@@ -1,1 +1,2 @@
-# Amethyst Reliable Data Protocol
+# Mercury: Reliable data protocol for online multiplayer games
+
