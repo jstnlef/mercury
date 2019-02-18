@@ -1,0 +1,12 @@
+[package]
+name = "mercury"
+version = "0.1.0"
+authors = ["Justin LeFebvre <jstnlefebvre@gmail.com>"]
+description = "A configurable semi-reliable network protocol for multiplayer games"
+keywords = ["gamedev", "networking", "udp"]
+categories = ["network-programming"]
+readme = "README.md"
+license = "MIT/Apache-2.0"
+edition = "2018"
+
+[dependencies]
