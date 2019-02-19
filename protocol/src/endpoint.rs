@@ -99,11 +99,23 @@ mod test {
     }
 
     #[test]
-    fn error_on_invalid_stream_id() {
+    fn error_on_invalid_stream_id_ordered() {
         let config = Config::default();
         let mut endpoint = Endpoint::new(config);
         let payload = "Hello world!".as_bytes();
-        let datagram = Datagram::reliable_ordered(payload, 33);
+        let datagram = Datagram::reliable_ordered(payload, 2);
+        assert_eq!(
+            endpoint.send(datagram).unwrap_err(),
+            ProtocolError::InvalidStreamId
+        );
+    }
+
+    #[test]
+    fn error_on_invalid_stream_id_sequenced() {
+        let config = Config::default();
+        let mut endpoint = Endpoint::new(config);
+        let payload = "Hello world!".as_bytes();
+        let datagram = Datagram::reliable_sequenced(payload, 2);
         assert_eq!(
             endpoint.send(datagram).unwrap_err(),
             ProtocolError::InvalidStreamId
