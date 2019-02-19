@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 
 /// Represents a request to send a payload (with a particular delivery guarantee) to process.
 pub struct Datagram<'a> {
-    pub(crate) stream_id: u8,
+    pub(crate) stream_id: usize,
     pub(crate) delivery_guarantee: DeliveryGuarantee,
     pub(crate) payload: &'a [u8],
 }
@@ -19,7 +19,7 @@ impl<'a> Datagram<'a> {
         }
     }
 
-    pub fn sequenced(payload: &'a [u8], stream_id: u8) -> Self {
+    pub fn sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery_guarantee: DeliveryGuarantee::Sequenced,
             stream_id,
@@ -35,7 +35,7 @@ impl<'a> Datagram<'a> {
         }
     }
 
-    pub fn reliable_sequenced(payload: &'a [u8], stream_id: u8) -> Self {
+    pub fn reliable_sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery_guarantee: DeliveryGuarantee::ReliableSequenced,
             stream_id,
@@ -43,7 +43,7 @@ impl<'a> Datagram<'a> {
         }
     }
 
-    pub fn reliable_ordered(payload: &'a [u8], stream_id: u8) -> Self {
+    pub fn reliable_ordered(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery_guarantee: DeliveryGuarantee::ReliableOrdered,
             stream_id,

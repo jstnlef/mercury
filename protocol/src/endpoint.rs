@@ -55,7 +55,7 @@ impl Endpoint {
             return Err(ProtocolError::PayloadTooLarge);
         }
 
-        let stream_id = datagram.stream_id as usize;
+        let stream_id = datagram.stream_id;
         if datagram.is_sequenced() {
             if stream_id >= self.sequenced_streams.len() {
                 return Err(ProtocolError::InvalidStreamId);
