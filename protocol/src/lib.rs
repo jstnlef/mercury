@@ -4,10 +4,10 @@ mod delivery;
 mod endpoint;
 mod errors;
 mod metrics;
-mod stream;
+mod streams;
 
 pub use crate::{
     datagram::Datagram,
     endpoint::Endpoint,
-    errors::{ProtocolResult, ProtocolError}
+    errors::{ProtocolError, ProtocolResult},
 };
