@@ -1,8 +1,8 @@
 mod config;
 mod datagram;
-mod delivery;
 mod endpoint;
 mod errors;
+mod guarantees;
 mod metrics;
 mod streams;
 

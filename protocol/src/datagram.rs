@@ -1,4 +1,4 @@
-use crate::delivery::DeliveryGuarantee;
+use crate::guarantees::{DeliveryGuarantee, OrderingGuarantee};
 use bytes::{Bytes, BytesMut};
 use crc::crc32;
 use lazy_static::lazy_static;
@@ -6,14 +6,16 @@ use lazy_static::lazy_static;
 /// Represents a request to send a payload (with a particular delivery guarantee) to process.
 pub struct Datagram<'a> {
     pub(crate) stream_id: usize,
-    pub(crate) delivery_guarantee: DeliveryGuarantee,
+    pub(crate) delivery: DeliveryGuarantee,
+    pub(crate) ordering: OrderingGuarantee,
     pub(crate) payload: &'a [u8],
 }
 
 impl<'a> Datagram<'a> {
     pub fn unreliable(payload: &'a [u8]) -> Self {
         Self {
-            delivery_guarantee: DeliveryGuarantee::Unreliable,
+            delivery: DeliveryGuarantee::Unreliable,
+            ordering: OrderingGuarantee::None,
             stream_id: 0xFF,
             payload,
         }
@@ -21,7 +23,8 @@ impl<'a> Datagram<'a> {
 
     pub fn sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
-            delivery_guarantee: DeliveryGuarantee::Sequenced,
+            delivery: DeliveryGuarantee::Unreliable,
+            ordering: OrderingGuarantee::Sequenced,
             stream_id,
             payload,
         }
@@ -29,7 +32,8 @@ impl<'a> Datagram<'a> {
 
     pub fn reliable(payload: &'a [u8]) -> Self {
         Self {
-            delivery_guarantee: DeliveryGuarantee::Reliable,
+            delivery: DeliveryGuarantee::Reliable,
+            ordering: OrderingGuarantee::None,
             stream_id: 0xFF,
             payload,
         }
@@ -37,7 +41,8 @@ impl<'a> Datagram<'a> {
 
     pub fn reliable_sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
-            delivery_guarantee: DeliveryGuarantee::ReliableSequenced,
+            delivery: DeliveryGuarantee::Reliable,
+            ordering: OrderingGuarantee::Sequenced,
             stream_id,
             payload,
         }
@@ -45,25 +50,23 @@ impl<'a> Datagram<'a> {
 
     pub fn reliable_ordered(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
-            delivery_guarantee: DeliveryGuarantee::ReliableOrdered,
+            delivery: DeliveryGuarantee::Reliable,
+            ordering: OrderingGuarantee::Ordered,
             stream_id,
             payload,
         }
     }
 
     pub fn is_reliable(&self) -> bool {
-        self.delivery_guarantee == DeliveryGuarantee::Reliable
-            || self.delivery_guarantee == DeliveryGuarantee::ReliableOrdered
-            || self.delivery_guarantee == DeliveryGuarantee::ReliableSequenced
+        self.delivery == DeliveryGuarantee::Reliable
     }
 
     pub fn is_ordered(&self) -> bool {
-        self.delivery_guarantee == DeliveryGuarantee::ReliableOrdered
+        self.ordering == OrderingGuarantee::Ordered
     }
 
     pub fn is_sequenced(&self) -> bool {
-        self.delivery_guarantee == DeliveryGuarantee::Sequenced
-            || self.delivery_guarantee == DeliveryGuarantee::ReliableSequenced
+        self.ordering == OrderingGuarantee::Sequenced
     }
 }
 
@@ -105,7 +108,7 @@ fn calc_checksum(payload: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod test {
-    use super::{Datagram, DeliveryGuarantee};
+    use super::{Datagram, DeliveryGuarantee, OrderingGuarantee};
 
     fn test_payload() -> &'static [u8] {
         "hello world".as_bytes()
@@ -114,21 +117,24 @@ mod test {
     #[test]
     fn ensure_unreliable_creation() {
         let datagram = Datagram::unreliable(test_payload());
-        assert_eq!(datagram.delivery_guarantee, DeliveryGuarantee::Unreliable);
+        assert_eq!(datagram.delivery, DeliveryGuarantee::Unreliable);
+        assert_eq!(datagram.ordering, OrderingGuarantee::None);
         assert_eq!(datagram.stream_id, 0xFF);
     }
 
     #[test]
     fn ensure_sequenced_creation() {
         let datagram = Datagram::sequenced(test_payload(), 0);
-        assert_eq!(datagram.delivery_guarantee, DeliveryGuarantee::Sequenced);
+        assert_eq!(datagram.delivery, DeliveryGuarantee::Unreliable);
+        assert_eq!(datagram.ordering, OrderingGuarantee::Sequenced);
         assert_eq!(datagram.stream_id, 0);
     }
 
     #[test]
     fn ensure_reliable_creation() {
         let datagram = Datagram::reliable(test_payload());
-        assert_eq!(datagram.delivery_guarantee, DeliveryGuarantee::Reliable);
+        assert_eq!(datagram.delivery, DeliveryGuarantee::Reliable);
+        assert_eq!(datagram.ordering, OrderingGuarantee::None);
         assert_eq!(datagram.stream_id, 0xFF);
     }
 
@@ -136,8 +142,12 @@ mod test {
     fn ensure_reliable_sequenced_creation() {
         let datagram = Datagram::reliable_sequenced(test_payload(), 0);
         assert_eq!(
-            datagram.delivery_guarantee,
-            DeliveryGuarantee::ReliableSequenced
+            datagram.delivery,
+            DeliveryGuarantee::Reliable
+        );
+        assert_eq!(
+            datagram.ordering,
+            OrderingGuarantee::Sequenced
         );
         assert_eq!(datagram.stream_id, 0);
     }
@@ -146,8 +156,12 @@ mod test {
     fn ensure_reliable_ordered_creation() {
         let datagram = Datagram::reliable_ordered(test_payload(), 0);
         assert_eq!(
-            datagram.delivery_guarantee,
-            DeliveryGuarantee::ReliableOrdered
+            datagram.delivery,
+            DeliveryGuarantee::Reliable
+        );
+        assert_eq!(
+            datagram.ordering,
+            OrderingGuarantee::Ordered
         );
         assert_eq!(datagram.stream_id, 0);
     }

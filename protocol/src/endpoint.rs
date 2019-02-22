@@ -1,7 +1,6 @@
 use crate::{
     config::Config,
     datagram::{Datagram, ReceiveDatagram},
-    delivery::DeliveryGuarantee,
     errors::{ProtocolError, ProtocolResult},
     metrics::Metrics,
     streams::{OrderedStream, SequencedStream},
