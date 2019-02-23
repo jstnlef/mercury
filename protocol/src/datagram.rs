@@ -12,6 +12,9 @@ pub struct Datagram<'a> {
 }
 
 impl<'a> Datagram<'a> {
+    /// Essentially bare UDP. May arrive out of order, or not at all. This is best for data
+    /// that is unimportant, or data that you send very frequently so even if some datagrams are
+    /// missed newer datagrams will compensate.
     pub fn unreliable(payload: &'a [u8]) -> Self {
         Self {
             delivery: DeliveryGuarantee::Unreliable,
@@ -21,6 +24,9 @@ impl<'a> Datagram<'a> {
         }
     }
 
+    /// Sequenced datagrams are the same as unreliable datagrams, except that only the newest
+    /// datagram is ever accepted. Older datagrams are ignored.
+    /// e.g. [1, 4, 3, 2, 4] returns [1, 4, 4] to the client.
     pub fn sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery: DeliveryGuarantee::Unreliable,
@@ -30,6 +36,9 @@ impl<'a> Datagram<'a> {
         }
     }
 
+    /// Reliable datagrams are UDP datagrams monitored by a reliabililty layer to ensure they arrive
+    /// at the destination. Prevents duplication.
+    /// e.g. [1, 4, 3, 2, 4] returns [1, 4, 3, 2] with a smaller chance of losing a datagram.
     pub fn reliable(payload: &'a [u8]) -> Self {
         Self {
             delivery: DeliveryGuarantee::Reliable,
@@ -39,6 +48,9 @@ impl<'a> Datagram<'a> {
         }
     }
 
+    /// Reliable sequenced datagrams are UDP datagrams monitored by a reliability layer to ensure
+    /// they arrive at the destination and are sequenced at the destination. Prevents duplication.
+    /// e.g. [1, 4, 3, 2, 4] returns [1, 4] with a smaller chance of losing a datagram.
     pub fn reliable_sequenced(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery: DeliveryGuarantee::Reliable,
@@ -48,6 +60,10 @@ impl<'a> Datagram<'a> {
         }
     }
 
+    /// Reliable ordered datagrams are UDP datagrams monitored by a reliability layer to ensure they
+    /// arrive at the destination and are ordered at the destination. Prevents duplication. This
+    /// will act similarly to TCP
+    /// e.g. [1, 4, 3, 2, 4] returns [1, 2, 3, 4] with a smaller chance of losing a datagram.
     pub fn reliable_ordered(payload: &'a [u8], stream_id: usize) -> Self {
         Self {
             delivery: DeliveryGuarantee::Reliable,
