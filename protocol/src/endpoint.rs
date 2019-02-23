@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    datagram::{Datagram, ReceiveDatagram},
+    datagram::{Datagram, ProcessedDatagram},
     errors::{ProtocolError, ProtocolResult},
     metrics::{DataPoint, Metrics},
     streams::{OrderedStream, SequencedStream},
@@ -45,8 +45,8 @@ impl Endpoint {
     }
 
     /// Process received data into a datagram
-    pub fn receive(&mut self, datagram: &[u8]) -> ProtocolResult<ReceiveDatagram> {
-        Ok(ReceiveDatagram::Full { payload: "".into() })
+    pub fn receive(&mut self, datagram: &[u8]) -> ProtocolResult<ProcessedDatagram> {
+        Ok(ProcessedDatagram::Full { payload: "".into() })
     }
 
     fn handle_reliable_send(&mut self, datagram: &Datagram) -> ProtocolResult<Bytes> {
