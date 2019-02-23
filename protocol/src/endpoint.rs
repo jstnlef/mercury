@@ -2,6 +2,7 @@ use crate::{
     config::Config,
     datagram::{Datagram, ProcessedDatagram},
     errors::{ProtocolError, ProtocolResult},
+    guarantees::{DeliveryGuarantee, OrderingGuarantee},
     metrics::{DataPoint, Metrics},
     streams::{OrderedStream, SequencedStream},
 };
@@ -37,10 +38,9 @@ impl Endpoint {
     /// Process a datagram to send. Returns a Bytes object representing the appropriately serialized
     /// datagram.
     pub fn send(&mut self, datagram: Datagram) -> ProtocolResult<Bytes> {
-        if datagram.is_reliable() {
-            self.handle_reliable_send(&datagram)
-        } else {
-            self.handle_unreliable_send(&datagram)
+        match datagram.delivery {
+            DeliveryGuarantee::Reliable => self.handle_reliable_send(&datagram),
+            DeliveryGuarantee::Unreliable => self.handle_unreliable_send(&datagram),
         }
     }
 
@@ -56,27 +56,37 @@ impl Endpoint {
         }
 
         let stream_id = datagram.stream_id;
-        if datagram.is_sequenced() {
-            if stream_id >= self.sequenced_streams.len() {
-                return Err(ProtocolError::InvalidStreamId);
-            }
-            let stream: &SequencedStream = &self.sequenced_streams[stream_id];
 
-            Ok(Bytes::new())
-        } else if datagram.is_ordered() {
-            if stream_id >= self.ordered_streams.len() {
-                return Err(ProtocolError::InvalidStreamId);
-            }
-            let stream: &OrderedStream = &self.ordered_streams[stream_id];
-
-            Ok(Bytes::new())
-        } else {
-            Ok(Bytes::new())
+        match datagram.ordering {
+            OrderingGuarantee::None => Ok(Bytes::new()),
+            OrderingGuarantee::Sequenced => {
+                if stream_id >= self.sequenced_streams.len() {
+                    return Err(ProtocolError::InvalidStreamId);
+                }
+                let stream: &SequencedStream = &self.sequenced_streams[stream_id];
+                Ok(Bytes::new())
+            },
+            OrderingGuarantee::Ordered => {
+                if stream_id >= self.ordered_streams.len() {
+                    return Err(ProtocolError::InvalidStreamId);
+                }
+                let stream: &OrderedStream = &self.ordered_streams[stream_id];
+                Ok(Bytes::new())
+            },
         }
     }
 
     fn handle_unreliable_send(&mut self, datagram: &Datagram) -> ProtocolResult<Bytes> {
-        Ok(Bytes::new())
+        match datagram.ordering {
+            OrderingGuarantee::None => Ok(Bytes::new()),
+            OrderingGuarantee::Sequenced => Ok(Bytes::new()),
+            OrderingGuarantee::Ordered => {
+                // This should never be able to be configured.
+                Err(ProtocolError::InvalidConfiguration(
+                    "Unable to send an unreliable yet ordered packet.",
+                ))
+            }
+        }
     }
 }
 

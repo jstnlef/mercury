@@ -157,28 +157,16 @@ mod test {
     #[test]
     fn ensure_reliable_sequenced_creation() {
         let datagram = Datagram::reliable_sequenced(test_payload(), 0);
-        assert_eq!(
-            datagram.delivery,
-            DeliveryGuarantee::Reliable
-        );
-        assert_eq!(
-            datagram.ordering,
-            OrderingGuarantee::Sequenced
-        );
+        assert_eq!(datagram.delivery, DeliveryGuarantee::Reliable);
+        assert_eq!(datagram.ordering, OrderingGuarantee::Sequenced);
         assert_eq!(datagram.stream_id, 0);
     }
 
     #[test]
     fn ensure_reliable_ordered_creation() {
         let datagram = Datagram::reliable_ordered(test_payload(), 0);
-        assert_eq!(
-            datagram.delivery,
-            DeliveryGuarantee::Reliable
-        );
-        assert_eq!(
-            datagram.ordering,
-            OrderingGuarantee::Ordered
-        );
+        assert_eq!(datagram.delivery, DeliveryGuarantee::Reliable);
+        assert_eq!(datagram.ordering, OrderingGuarantee::Ordered);
         assert_eq!(datagram.stream_id, 0);
     }
 }

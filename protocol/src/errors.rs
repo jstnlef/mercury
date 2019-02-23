@@ -9,6 +9,7 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 pub enum ProtocolError {
     PayloadTooLarge,
     InvalidStreamId,
+    InvalidConfiguration(&'static str),
 }
 
 impl Display for ProtocolError {
@@ -18,6 +19,7 @@ impl Display for ProtocolError {
                 write!(f, "The payload size was bigger than the max allowed size.")
             }
             ProtocolError::InvalidStreamId => write!(f, "The desired stream id is too large."),
+            ProtocolError::InvalidConfiguration(s) => write!(f, "Invalid Configuration: {}", s),
         }
     }
 }

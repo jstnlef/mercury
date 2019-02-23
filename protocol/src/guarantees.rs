@@ -4,12 +4,12 @@
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum DeliveryGuarantee {
     Unreliable,
-    Reliable
+    Reliable,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OrderingGuarantee {
     None,
     Ordered,
-    Sequenced
+    Sequenced,
 }
