@@ -92,7 +92,7 @@ impl Endpoint {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Datagram, Endpoint, ProtocolError};
+    use super::{Config, Datagram, DeliveryGuarantee, Endpoint, OrderingGuarantee, ProtocolError};
 
     #[test]
     fn error_on_large_payload_for_reliable_send() {
@@ -130,5 +130,22 @@ mod test {
             endpoint.send(datagram).unwrap_err(),
             ProtocolError::InvalidStreamId
         );
+    }
+
+    #[test]
+    fn error_on_unreliable_ordered_config() {
+        let config = Config::default();
+        let mut endpoint = Endpoint::new(config);
+        let payload = "Hello world!".as_bytes();
+        let datagram = Datagram {
+            stream_id: 0,
+            delivery: DeliveryGuarantee::Unreliable,
+            ordering: OrderingGuarantee::Ordered,
+            payload
+        };
+        assert_eq!(
+            endpoint.send(datagram).unwrap_err(),
+            ProtocolError::InvalidConfiguration("Unable to send an unreliable yet ordered packet.")
+        )
     }
 }
