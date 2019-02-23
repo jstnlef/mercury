@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     datagram::{Datagram, ReceiveDatagram},
     errors::{ProtocolError, ProtocolResult},
-    metrics::Metrics,
+    metrics::{DataPoint, Metrics},
     streams::{OrderedStream, SequencedStream},
 };
 use bytes::{Bytes, BytesMut};
@@ -51,6 +51,7 @@ impl Endpoint {
 
     fn handle_reliable_send(&mut self, datagram: &Datagram) -> ProtocolResult<Bytes> {
         if datagram.payload.len() > self.config.max_payload_size_bytes() {
+            self.metrics.increment(DataPoint::PacketsTooLargeToSend);
             return Err(ProtocolError::PayloadTooLarge);
         }
 

@@ -28,7 +28,7 @@ impl Metrics {
     }
 
     // Increments the value of a particular data point.
-    pub fn increment(&mut self, data_point: DataPoint) {
+    pub(crate) fn increment(&mut self, data_point: DataPoint) {
         self.counters[data_point as usize] += 1;
     }
 }
