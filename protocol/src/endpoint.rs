@@ -26,12 +26,13 @@ impl Endpoint {
     pub fn new(config: Config) -> Self {
         let ordered_size = config.ordered_streams_size();
         let sequenced_size = config.sequenced_streams_size();
+        let bandwidth_smoothing_factor = config.bandwidth_smoothing_factor();
         Self {
             config,
             ordered_streams: vec![OrderedStream::new(); ordered_size].into_boxed_slice(),
             sequenced_streams: vec![SequencedStream::new(); sequenced_size].into_boxed_slice(),
             rtt: 0.0,
-            metrics: Metrics::new(),
+            metrics: Metrics::new(bandwidth_smoothing_factor),
         }
     }
 

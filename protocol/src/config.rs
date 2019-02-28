@@ -1,5 +1,6 @@
 #[derive(Clone)]
 pub struct Config {
+    bandwidth_smoothing_factor: f32,
     /// Number of ordered streams available
     /// default: 1
     ordered_streams_size: usize,
@@ -16,6 +17,11 @@ pub struct Config {
 }
 
 impl Config {
+    #[inline]
+    pub const fn bandwidth_smoothing_factor(&self) -> f32 {
+        self.bandwidth_smoothing_factor
+    }
+
     #[inline]
     pub const fn ordered_streams_size(&self) -> usize {
         self.ordered_streams_size
@@ -55,6 +61,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            bandwidth_smoothing_factor: 0.1,
             ordered_streams_size: 1,
             sequenced_streams_size: 1,
             max_fragments: 16,
