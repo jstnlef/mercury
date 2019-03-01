@@ -92,11 +92,10 @@ pub enum DataPoint {
     PacketsStale = 3,
     PacketsInvalid = 4,
     PacketsTooLargeToSend = 5,
-    PacketsTooLargeToReceive = 6,
-    FragmentsSent = 7,
-    FragmentsReceived = 8,
-    FragmentsInvalid = 9,
-    Length = 10,
+    FragmentsSent = 6,
+    FragmentsReceived = 7,
+    FragmentsInvalid = 8,
+    Length = 9,
 }
 
 #[cfg(test)]
