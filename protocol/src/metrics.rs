@@ -1,5 +1,7 @@
 use std::fmt;
 
+/// This is a direct port of the bandwidth calculations found in
+/// https://github.com/networkprotocol/reliable.io
 macro_rules! calc_bandwidth {
     ($prop_name: expr, $bytes: ident, $time: ident, $smoothing: expr) => {
         let current_bandwidth = (($bytes as f64 / $time) * 8.0 / 1000.0) as f32;
