@@ -72,18 +72,6 @@ impl<'a> Datagram<'a> {
             payload,
         }
     }
-
-    pub fn is_reliable(&self) -> bool {
-        self.delivery == DeliveryGuarantee::Reliable
-    }
-
-    pub fn is_ordered(&self) -> bool {
-        self.ordering == OrderingGuarantee::Ordered
-    }
-
-    pub fn is_sequenced(&self) -> bool {
-        self.ordering == OrderingGuarantee::Sequenced
-    }
 }
 
 pub fn full<T: Into<BytesMut>>(payload: T) -> ProcessedDatagram {

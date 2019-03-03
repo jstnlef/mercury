@@ -84,7 +84,7 @@ impl Endpoint {
             OrderingGuarantee::Ordered => {
                 // This should never be able to be configured.
                 Err(ProtocolError::InvalidConfiguration(
-                    "Unable to send an unreliable yet ordered packet.",
+                    "Unable to send an unreliable and ordered packet.",
                 ))
             }
         }
@@ -146,7 +146,7 @@ mod test {
         };
         assert_eq!(
             endpoint.send(datagram).unwrap_err(),
-            ProtocolError::InvalidConfiguration("Unable to send an unreliable yet ordered packet.")
+            ProtocolError::InvalidConfiguration("Unable to send an unreliable and ordered packet.")
         )
     }
 }
