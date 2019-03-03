@@ -7,7 +7,7 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
-    PayloadTooLarge,
+    PayloadTooLarge(usize, usize),
     InvalidStreamId,
     InvalidConfiguration(&'static str),
 }
@@ -15,9 +15,11 @@ pub enum ProtocolError {
 impl Display for ProtocolError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            ProtocolError::PayloadTooLarge => {
-                write!(f, "The payload size was bigger than the max allowed size.")
-            }
+            ProtocolError::PayloadTooLarge(size, max_size) => write!(
+                f,
+                "The payload size ({} bytes) was bigger than the max allowed size ({} bytes).",
+                size, max_size
+            ),
             ProtocolError::InvalidStreamId => write!(f, "The desired stream id is too large."),
             ProtocolError::InvalidConfiguration(s) => write!(f, "Invalid Configuration: {}", s),
         }

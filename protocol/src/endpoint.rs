@@ -40,8 +40,8 @@ impl Endpoint {
     /// datagram.
     pub fn send(&mut self, datagram: Datagram) -> ProtocolResult<Bytes> {
         match datagram.delivery {
-            DeliveryGuarantee::Reliable => self.handle_reliable_send(&datagram),
-            DeliveryGuarantee::Unreliable => self.handle_unreliable_send(&datagram),
+            DeliveryGuarantee::Reliable => self.handle_reliable_send(datagram),
+            DeliveryGuarantee::Unreliable => self.handle_unreliable_send(datagram),
         }
     }
 
@@ -50,10 +50,13 @@ impl Endpoint {
         Ok(ProcessedDatagram::Full { payload: "".into() })
     }
 
-    fn handle_reliable_send(&mut self, datagram: &Datagram) -> ProtocolResult<Bytes> {
+    fn handle_reliable_send(&mut self, datagram: Datagram) -> ProtocolResult<Bytes> {
         if datagram.payload.len() > self.config.max_payload_size_bytes() {
             self.metrics.increment(DataPoint::PacketsTooLargeToSend);
-            return Err(ProtocolError::PayloadTooLarge);
+            return Err(ProtocolError::PayloadTooLarge(
+                datagram.payload.len(),
+                self.config.max_payload_size_bytes(),
+            ));
         }
 
         let stream_id = datagram.stream_id;
@@ -66,18 +69,18 @@ impl Endpoint {
                 }
                 let stream: &SequencedStream = &self.sequenced_streams[stream_id];
                 Ok(Bytes::new())
-            },
+            }
             OrderingGuarantee::Ordered => {
                 if stream_id >= self.ordered_streams.len() {
                     return Err(ProtocolError::InvalidStreamId);
                 }
                 let stream: &OrderedStream = &self.ordered_streams[stream_id];
                 Ok(Bytes::new())
-            },
+            }
         }
     }
 
-    fn handle_unreliable_send(&mut self, datagram: &Datagram) -> ProtocolResult<Bytes> {
+    fn handle_unreliable_send(&mut self, datagram: Datagram) -> ProtocolResult<Bytes> {
         match datagram.ordering {
             OrderingGuarantee::None => Ok(Bytes::new()),
             OrderingGuarantee::Sequenced => Ok(Bytes::new()),
@@ -105,7 +108,7 @@ mod test {
         let datagram = Datagram::reliable(payload);
         assert_eq!(
             endpoint.send(datagram).unwrap_err(),
-            ProtocolError::PayloadTooLarge
+            ProtocolError::PayloadTooLarge(12, 2)
         );
     }
 
@@ -142,7 +145,7 @@ mod test {
             stream_id: 0,
             delivery: DeliveryGuarantee::Unreliable,
             ordering: OrderingGuarantee::Ordered,
-            payload
+            payload,
         };
         assert_eq!(
             endpoint.send(datagram).unwrap_err(),

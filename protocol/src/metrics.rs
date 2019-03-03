@@ -24,7 +24,7 @@ pub struct Metrics {
     acked_bandwidth_kbps: f32,
 
     // Config values to tweak the calculated fields
-    bandwidth_smoothing_factor: f32
+    bandwidth_smoothing_factor: f32,
 }
 
 impl Metrics {
@@ -35,7 +35,7 @@ impl Metrics {
             sent_bandwidth_kbps: 0.0,
             received_bandwidth_kbps: 0.0,
             acked_bandwidth_kbps: 0.0,
-            bandwidth_smoothing_factor
+            bandwidth_smoothing_factor,
         }
     }
 
@@ -66,17 +66,36 @@ impl Metrics {
 
     // Calculate the sent bandwidth given the bytes sent and the time_delta_ms.
     pub(crate) fn calculate_sent_bandwidth(&mut self, bytes_sent: usize, time_delta_ms: f64) {
-        calc_bandwidth!(self.sent_bandwidth_kbps, bytes_sent, time_delta_ms, self.bandwidth_smoothing_factor);
+        calc_bandwidth!(
+            self.sent_bandwidth_kbps,
+            bytes_sent,
+            time_delta_ms,
+            self.bandwidth_smoothing_factor
+        );
     }
 
     // Calculate the received bandwidth given the bytes received and the time_delta_ms.
-    pub(crate) fn calculate_receive_bandwidth(&mut self, bytes_received: usize, time_delta_ms: f64) {
-        calc_bandwidth!(self.received_bandwidth_kbps, bytes_received, time_delta_ms, self.bandwidth_smoothing_factor);
+    pub(crate) fn calculate_receive_bandwidth(
+        &mut self,
+        bytes_received: usize,
+        time_delta_ms: f64,
+    ) {
+        calc_bandwidth!(
+            self.received_bandwidth_kbps,
+            bytes_received,
+            time_delta_ms,
+            self.bandwidth_smoothing_factor
+        );
     }
 
     // Calculate the acked bandwidth given the bytes acked and the time_delta_ms.
     pub(crate) fn calculate_acked_bandwidth(&mut self, bytes_acked: usize, time_delta_ms: f64) {
-        calc_bandwidth!(self.acked_bandwidth_kbps, bytes_acked, time_delta_ms, self.bandwidth_smoothing_factor);
+        calc_bandwidth!(
+            self.acked_bandwidth_kbps,
+            bytes_acked,
+            time_delta_ms,
+            self.bandwidth_smoothing_factor
+        );
     }
 }
 
