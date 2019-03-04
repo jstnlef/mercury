@@ -74,24 +74,24 @@ impl<'a> Datagram<'a> {
     }
 }
 
-pub fn full<T: Into<BytesMut>>(payload: T) -> ProcessedDatagram {
-    ProcessedDatagram::Full {
+pub fn full<T: Into<BytesMut>>(payload: T) -> ReceivedDatagram {
+    ReceivedDatagram::Full {
         payload: payload.into(),
     }
 }
 
-pub fn fragment<T: Into<BytesMut>>(payload: T) -> ProcessedDatagram {
-    ProcessedDatagram::Fragment {
+pub fn fragment<T: Into<BytesMut>>(payload: T) -> ReceivedDatagram {
+    ReceivedDatagram::Fragment {
         payload: payload.into(),
     }
 }
 
-pub enum ProcessedDatagram {
+pub enum ReceivedDatagram {
     Fragment { payload: BytesMut },
     Full { payload: BytesMut },
 }
 
-impl ProcessedDatagram {
+impl ReceivedDatagram {
     pub fn serialize() -> Bytes {
         Bytes::new()
     }
