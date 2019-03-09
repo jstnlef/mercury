@@ -7,6 +7,9 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
+    EmptyPayload,
+    NumberOfFragmentsGreaterThanWindowSize,
+    IncompleteMessage,
     PayloadTooLarge(usize, usize),
     InvalidStreamId,
     InvalidConfiguration(&'static str),
@@ -15,6 +18,13 @@ pub enum ProtocolError {
 impl Display for ProtocolError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ProtocolError::EmptyPayload => write!(f, "Attempted to send an empty buffer."),
+            ProtocolError::NumberOfFragmentsGreaterThanWindowSize => {
+                write!(f, "Number of fragments required is greater than the window size.")
+            }
+            ProtocolError::IncompleteMessage => {
+                write!(f, "Attempted to peek_size on an incomplete or missing message")
+            }
             ProtocolError::PayloadTooLarge(size, max_size) => write!(
                 f,
                 "The payload size ({} bytes) was bigger than the max allowed size ({} bytes).",
