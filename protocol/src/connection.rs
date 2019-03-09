@@ -1,7 +1,7 @@
 use crate::{
     ProtocolError,
     ProtocolResult,
-    DEADLINK, INTERVAL, MTU_DEF, OVERHEAD, RTO_DEF, RTO_MIN, THRESH_INIT, RECV_WINDOW_SIZE, SEND_WINDOW_SIZE,
+    DEADLINK, INTERVAL, DEFAULT_MTU, PROTOCOL_OVERHEAD, RTO_DEF, RTO_MIN, THRESH_INIT, RECV_WINDOW_SIZE, SEND_WINDOW_SIZE,
     segment::Segment
 };
 use bytes::{
@@ -16,7 +16,7 @@ use std::{
 
 pub struct ReliableConnection {
     conv: u32,
-    mtu: u32,
+    mtu: usize,
     max_segment_size: usize,
     state: u32,
 
@@ -75,8 +75,8 @@ impl ReliableConnection {
     pub fn new(conv: u32) -> Self {
         Self {
             conv,
-            mtu: MTU_DEF,
-            max_segment_size: (MTU_DEF - OVERHEAD) as usize,
+            mtu: DEFAULT_MTU,
+            max_segment_size: DEFAULT_MTU - PROTOCOL_OVERHEAD,
             state: 0,
 
             send_una: 0,
@@ -120,7 +120,7 @@ impl ReliableConnection {
             //    acklist: Vec<(u32, u32)>,
 
             // user: String,
-            payload_buffer: BytesMut::with_capacity(((MTU_DEF + OVERHEAD) * 3) as usize),
+            payload_buffer: BytesMut::with_capacity((DEFAULT_MTU + PROTOCOL_OVERHEAD) * 3),
 
             fast_resend: 0,
 
@@ -213,6 +213,22 @@ impl ReliableConnection {
 
         Ok(())
     }
+
+    /// Change MTU size, default is DEFAULT_MTU. This method will also resize the payload_buffer
+    /// to 3 times the MTU.
+    pub fn set_mtu(&mut self, mtu: usize) -> ProtocolResult<()> {
+        // TODO: KCP has this check. Why the 50?
+        if mtu < 50 || mtu < PROTOCOL_OVERHEAD {
+            return Err(ProtocolError::InvalidConfiguration("MTU too small."));
+        }
+
+        self.mtu = mtu;
+        self.max_segment_size = self.mtu - PROTOCOL_OVERHEAD;
+        let new_size = (mtu + PROTOCOL_OVERHEAD) * 3;
+        self.payload_buffer.resize(new_size, 0);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -240,4 +256,32 @@ mod test {
     }
 
     // TODO: Add many more tests around send
+
+    #[test]
+    fn test_set_mtu_error_when_too_small() {
+        let mut connection = ReliableConnection::new(0);
+        // Errors when too small
+        assert_eq!(connection.set_mtu(0).unwrap_err(), ProtocolError::InvalidConfiguration("MTU too small."));
+        assert_eq!(connection.set_mtu(49).unwrap_err(), ProtocolError::InvalidConfiguration("MTU too small."));
+    }
+
+    #[test]
+    fn test_set_mtu_resize_when_large_truncate_when_small() {
+        let mut connection = ReliableConnection::new(0);
+        assert_eq!(connection.payload_buffer.len(), 0);
+        assert_eq!(connection.payload_buffer.capacity(), 4272);
+
+        assert!(connection.set_mtu(50).is_ok());
+        assert_eq!(connection.mtu, 50);
+        assert_eq!(connection.max_segment_size, 26);
+        assert_eq!(connection.payload_buffer.len(), 222);
+        assert_eq!(connection.payload_buffer.capacity(), 4272);
+
+        // Looks like Bytes doubles its buffer when resized.
+        assert!(connection.set_mtu(1500).is_ok());
+        assert_eq!(connection.mtu, 1500);
+        assert_eq!(connection.max_segment_size, 1476);
+        assert_eq!(connection.payload_buffer.len(), 4572);
+        assert_eq!(connection.payload_buffer.capacity(), 8544);
+    }
 }

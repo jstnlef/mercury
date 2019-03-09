@@ -1,6 +1,4 @@
-use crate::ProtocolResult;
 use bytes::{BufMut, Bytes, BytesMut};
-use std::io::Write;
 
 #[derive(Default)]
 pub struct Segment {
