@@ -1,17 +1,17 @@
 use crate::{
-    ProtocolError,
-    ProtocolResult,
-    DEADLINK, INTERVAL, DEFAULT_MTU, PROTOCOL_OVERHEAD, RTO_DEF, RTO_MIN, THRESH_INIT, RECV_WINDOW_SIZE, SEND_WINDOW_SIZE,
-    segment::Segment
+    segment::Segment, ProtocolError, ProtocolResult, DEADLINK, DEFAULT_MTU, INTERVAL,
+    PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT,
 };
-use bytes::{
-    Buf,
-    BytesMut
-};
+use bytes::{Buf, BytesMut};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use std::{
-    collections::VecDeque,
     cmp,
-    io::{Cursor, Read}
+    collections::VecDeque,
+    io::{Cursor, Read},
+    ops::Add,
+    time::Instant,
 };
 
 pub struct ReliableConnection {
@@ -40,13 +40,14 @@ pub struct ReliableConnection {
     cwnd: u32,
     probe: u32,
 
-    current: u32,
-    interval: u32,
-    ts_flush: u32,
+    current_time: SystemTime,
+    interval: Duration,
+    last_flush_time: SystemTime,
+    update_called: bool,
+
     xmit: u32,
 
     nodelay: u32,
-    updated: u32,
 
     ts_probe: u32,
     probe_wait: u32,
@@ -98,13 +99,14 @@ impl ReliableConnection {
             cwnd: 0,
             probe: 0,
 
-            current: 0,
-            interval: INTERVAL,
-            ts_flush: INTERVAL,
+            current_time: SystemTime::now(),
+            interval: Duration::from_millis(INTERVAL),
+            last_flush_time: SystemTime::now(),
+            update_called: false,
+
             xmit: 0,
 
             nodelay: 0,
-            updated: 0,
 
             ts_probe: 0,
             probe_wait: 0,
@@ -137,7 +139,7 @@ impl ReliableConnection {
     pub fn peek_size(&self) -> ProtocolResult<usize> {
         let segment = match self.recv_queue.front() {
             Some(seg) => seg,
-            None => return Err(ProtocolError::IncompleteMessage)
+            None => return Err(ProtocolError::IncompleteMessage),
         };
 
         // If we're in streaming mode or this is the only fragment, just return the length of the
@@ -148,7 +150,7 @@ impl ReliableConnection {
 
         // If the next segment is not found in the queue, something is broken.
         if self.recv_queue.len() < (segment.fragment_id + 1) as usize {
-            return Err(ProtocolError::IncompleteMessage)
+            return Err(ProtocolError::IncompleteMessage);
         }
 
         let mut size = 0;
@@ -194,7 +196,7 @@ impl ReliableConnection {
         };
 
         if num_fragments >= RECV_WINDOW_SIZE {
-            return Err(ProtocolError::NumberOfFragmentsGreaterThanWindowSize)
+            return Err(ProtocolError::NumberOfFragmentsGreaterThanWindowSize);
         }
 
         if num_fragments == 0 {
@@ -207,11 +209,48 @@ impl ReliableConnection {
             let mut segment = Segment::default();
             segment.data.resize(new_size, 0);
             cursor.read_exact(&mut segment.data);
-            segment.fragment_id = (if !self.in_streaming_mode { num_fragments - i - 1 } else { 0 }) as u8;
+            segment.fragment_id = (if !self.in_streaming_mode {
+                num_fragments - i - 1
+            } else {
+                0
+            }) as u8;
             self.send_queue.push_back(segment);
         }
 
         Ok(())
+    }
+
+    /// Flushes pending data.
+    pub fn flush(&mut self) {}
+
+    /// Updates state (call it repeatedly, every 10ms-100ms), or you can ask
+    /// `check` when to call it again (without `input`/`send` calling).
+    pub fn update(&mut self, current: SystemTime) {
+        self.current_time = current;
+        if !self.update_called {
+            self.update_called = true;
+            self.last_flush_time = self.current_time;
+        }
+
+        let mut time_since = time_diff(self.current_time, self.last_flush_time);
+
+        if time_since >= 10_000 || time_since < -10_000 {
+            self.last_flush_time = self.current_time;
+            time_since = 0;
+        }
+
+        if time_since >= 0 {
+            self.last_flush_time += self.interval;
+            if time_diff(self.current_time, self.last_flush_time) >= 0 {
+                self.last_flush_time = self.current_time + self.interval;
+            }
+            self.flush();
+        }
+    }
+
+    /// Determines when you should next call `update()`
+    pub fn check(&self, current: Instant) -> Instant {
+        Instant::now()
     }
 
     /// Change MTU size, default is DEFAULT_MTU. This method will also resize the payload_buffer
@@ -242,9 +281,21 @@ impl ReliableConnection {
     }
 }
 
+#[inline]
+fn time_diff(later: SystemTime, earlier: SystemTime) -> i128 {
+    match later.duration_since(earlier) {
+        Ok(d) => d.as_millis() as i128,
+        Err(e) => -(e.duration().as_millis() as i128),
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::{ProtocolError, ReliableConnection};
+    use super::{time_diff, ProtocolError, ReliableConnection};
+    use std::{
+        thread,
+        time::{Duration, SystemTime},
+    };
 
     #[test]
     fn test_peek_size() {
@@ -272,8 +323,14 @@ mod test {
     fn test_set_mtu_error_when_too_small() {
         let mut connection = ReliableConnection::new(0);
         // Errors when too small
-        assert_eq!(connection.set_mtu(0).unwrap_err(), ProtocolError::InvalidConfiguration("MTU too small."));
-        assert_eq!(connection.set_mtu(49).unwrap_err(), ProtocolError::InvalidConfiguration("MTU too small."));
+        assert_eq!(
+            connection.set_mtu(0).unwrap_err(),
+            ProtocolError::InvalidConfiguration("MTU too small.")
+        );
+        assert_eq!(
+            connection.set_mtu(49).unwrap_err(),
+            ProtocolError::InvalidConfiguration("MTU too small.")
+        );
     }
 
     #[test]
@@ -294,5 +351,14 @@ mod test {
         assert_eq!(connection.max_segment_size, 1476);
         assert_eq!(connection.payload_buffer.len(), 4572);
         assert_eq!(connection.payload_buffer.capacity(), 8544);
+    }
+
+    #[test]
+    fn test_time_diff() {
+        let t1 = SystemTime::now();
+        let t2 = t1 + Duration::from_millis(200);
+
+        assert_eq!(time_diff(t2, t1), 200);
+        assert_eq!(time_diff(t1, t2), -200);
     }
 }
