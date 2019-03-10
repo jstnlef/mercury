@@ -33,8 +33,8 @@ pub struct ReliableConnection {
     rx_rto: i32,
     rx_minrto: i32,
 
-    send_window: usize,
-    recv_window: usize,
+    send_window_size: usize,
+    recv_window_size: usize,
     rmt_window: usize,
 
     cwnd: u32,
@@ -92,8 +92,8 @@ impl ReliableConnection {
             rx_rto: RTO_DEF,
             rx_minrto: RTO_MIN,
 
-            send_window: SEND_WINDOW_SIZE,
-            recv_window: RECV_WINDOW_SIZE,
+            send_window_size: SEND_WINDOW_SIZE,
+            recv_window_size: RECV_WINDOW_SIZE,
             rmt_window: RECV_WINDOW_SIZE,
             cwnd: 0,
             probe: 0,
@@ -228,6 +228,17 @@ impl ReliableConnection {
         self.payload_buffer.resize(new_size, 0);
 
         Ok(())
+    }
+
+    // Sets maximum window sizes: send_window_size=32, recv_window_size=32 by default
+    pub fn set_window_sizes(&mut self, send_size: usize, recv_size: usize) {
+        self.send_window_size = send_size;
+        self.recv_window_size = recv_size;
+    }
+
+    // Number of segments waiting to be sent.
+    pub fn awaiting_send(&self) -> usize {
+        self.send_buffer.len() + self.send_queue.len()
     }
 }
 
