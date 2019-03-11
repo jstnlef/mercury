@@ -220,9 +220,6 @@ impl ReliableConnection {
         Ok(())
     }
 
-    /// Flushes pending data.
-    pub fn flush(&mut self) {}
-
     /// Updates state (call it repeatedly, every 10ms-100ms), or you can ask
     /// `check` when to call it again (without `input`/`send` calling).
     pub fn update(&mut self, current: SystemTime) {
@@ -279,9 +276,20 @@ impl ReliableConnection {
     pub fn awaiting_send(&self) -> usize {
         self.send_buffer.len() + self.send_queue.len()
     }
+
+    // Flushes pending data.
+    fn flush(&mut self) {}
+
+    // Calculates the number of open slots in the receive queue based on the set recv window size.
+    fn open_slots_in_recv_queue(&self) -> usize {
+        if self.recv_queue.len() < self.recv_window_size {
+            self.recv_window_size - self.recv_queue.len()
+        } else {
+            0
+        }
+    }
 }
 
-#[inline]
 fn time_diff(later: SystemTime, earlier: SystemTime) -> i128 {
     match later.duration_since(earlier) {
         Ok(d) => d.as_millis() as i128,
@@ -291,11 +299,25 @@ fn time_diff(later: SystemTime, earlier: SystemTime) -> i128 {
 
 #[cfg(test)]
 mod test {
-    use super::{time_diff, ProtocolError, ReliableConnection};
+    use super::{time_diff, ProtocolError, ReliableConnection, Segment};
     use std::{
         thread,
         time::{Duration, SystemTime},
     };
+
+    #[test]
+    fn test_open_slots_in_recv_queue() {
+        let mut connection = ReliableConnection::new(0);
+        assert_eq!(connection.recv_window_size, 32);
+        assert_eq!(connection.open_slots_in_recv_queue(), 32);
+        for i in 0..32 {
+            connection.recv_queue.push_back(Segment::default());
+        }
+
+        assert_eq!(connection.open_slots_in_recv_queue(), 0);
+        connection.set_window_sizes(32, 0);
+        assert_eq!(connection.open_slots_in_recv_queue(), 0);
+    }
 
     #[test]
     fn test_peek_size() {
