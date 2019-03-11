@@ -24,7 +24,7 @@ const RTO_MAX: u32 = 60_000;
 // cmd: push data
 const CMD_PUSH: u32 = 81;
 // cmd: ack
-const CMD_ACK: u32 = 82;
+const CMD_ACK: u8 = 82;
 // cmd: window probe (ask)
 const CMD_WASK: u32 = 83;
 // cmd: window size (tell)

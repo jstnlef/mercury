@@ -1,6 +1,6 @@
 use crate::{
     segment::Segment, ProtocolError, ProtocolResult, DEADLINK, DEFAULT_MTU, INTERVAL,
-    PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT,
+    PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT, CMD_ACK
 };
 use bytes::{Buf, BytesMut};
 use std::time::Duration;
@@ -246,8 +246,43 @@ impl ReliableConnection {
     }
 
     /// Determines when you should next call `update()`
-    pub fn check(&self, current: Instant) -> Instant {
-        Instant::now()
+    pub fn check(&self, current: SystemTime) -> SystemTime {
+        if !self.update_called {
+            return current;
+        }
+
+        let mut ts_flush = self.last_flush_time;
+        let time_delta = time_diff(current, ts_flush);
+
+        if time_delta >= 0 {
+            return current;
+        }
+
+        println!("time_delta {:?}", time_delta);
+
+        if time_delta >= 10_000 || time_delta < -10_000 {
+            ts_flush = current;
+        }
+
+        let mut tm_flush = time_diff(ts_flush, current);
+        let mut tm_packet = i128::max_value();
+
+        for segment in self.send_buffer.iter() {
+            let diff = time_diff(segment.resend_time, current);
+            if diff <= 0 {
+                return current;
+            }
+            if diff < tm_packet {
+                tm_packet = diff;
+            }
+        }
+
+        let minimal = cmp::min(
+            cmp::min(tm_packet, tm_flush),
+            self.interval.as_millis() as i128
+        );
+
+        return current.add(Duration::from_millis(minimal as u64))
     }
 
     /// Change MTU size, default is DEFAULT_MTU. This method will also resize the payload_buffer
@@ -273,15 +308,17 @@ impl ReliableConnection {
     }
 
     // Number of segments waiting to be sent.
-    pub fn awaiting_send(&self) -> usize {
+    pub fn num_segments_awaiting_send(&self) -> usize {
         self.send_buffer.len() + self.send_queue.len()
     }
 
     // Flushes pending data.
-    fn flush(&mut self) {}
+    fn flush(&mut self) {
+
+    }
 
     // Calculates the number of open slots in the receive queue based on the set recv window size.
-    fn open_slots_in_recv_queue(&self) -> usize {
+    fn num_open_slots_in_recv_queue(&self) -> usize {
         if self.recv_queue.len() < self.recv_window_size {
             self.recv_window_size - self.recv_queue.len()
         } else {
@@ -309,14 +346,14 @@ mod test {
     fn test_open_slots_in_recv_queue() {
         let mut connection = ReliableConnection::new(0);
         assert_eq!(connection.recv_window_size, 32);
-        assert_eq!(connection.open_slots_in_recv_queue(), 32);
-        for i in 0..32 {
+        assert_eq!(connection.num_open_slots_in_recv_queue(), 32);
+        for _ in 0..32 {
             connection.recv_queue.push_back(Segment::default());
         }
 
-        assert_eq!(connection.open_slots_in_recv_queue(), 0);
+        assert_eq!(connection.num_open_slots_in_recv_queue(), 0);
         connection.set_window_sizes(32, 0);
-        assert_eq!(connection.open_slots_in_recv_queue(), 0);
+        assert_eq!(connection.num_open_slots_in_recv_queue(), 0);
     }
 
     #[test]
@@ -383,4 +420,17 @@ mod test {
         assert_eq!(time_diff(t2, t1), 200);
         assert_eq!(time_diff(t1, t2), -200);
     }
+
+    #[test]
+    fn test_check() {
+        let mut connection = ReliableConnection::new(0);
+        let current = SystemTime::now();
+        assert_eq!(connection.check(current), current);
+        connection.update(current);
+        assert_eq!(connection.check(current), current + connection.interval);
+        let current = current + Duration::from_millis(200);
+        assert_eq!(connection.check(current), current);
+    }
+
+    // TODO: Add more tests for check
 }

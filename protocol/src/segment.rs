@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use std::time::SystemTime;
 
-#[derive(Default)]
 pub struct Segment {
     pub(crate) conv: u32,
     pub(crate) cmd: u8,
@@ -9,15 +9,21 @@ pub struct Segment {
     pub(crate) ts: u32,
     pub(crate) sn: u32,
     pub(crate) una: u32,
-    pub(crate) resendts: u32,
+    pub(crate) resend_time: SystemTime,
     pub(crate) rto: u32,
     pub(crate) fastack: u32,
     pub(crate) xmit: u32,
     pub(crate) data: BytesMut,
 }
 
+impl Default for Segment {
+    fn default() -> Self {
+        Segment::new(BytesMut::new())
+    }
+}
+
 impl Segment {
-    pub fn new(&self, data: BytesMut) -> Self {
+    pub fn new(data: BytesMut) -> Self {
         Self {
             conv: 0,
             cmd: 0,
@@ -26,7 +32,7 @@ impl Segment {
             ts: 0,
             sn: 0,
             una: 0,
-            resendts: 0,
+            resend_time: SystemTime::now(),
             rto: 0,
             fastack: 0,
             xmit: 0,
