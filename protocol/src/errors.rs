@@ -10,6 +10,9 @@ pub enum ProtocolError {
     EmptyPayload,
     NumberOfFragmentsGreaterThanWindowSize,
     IncompleteMessage,
+    EmptyRecvQueue,
+    RecvBufferTooSmall,
+
     PayloadTooLarge(usize, usize),
     InvalidStreamId,
     InvalidConfiguration(&'static str),
@@ -27,6 +30,14 @@ impl Display for ProtocolError {
                 f,
                 "Attempted to peek_size on an incomplete or missing message"
             ),
+            ProtocolError::EmptyRecvQueue => {
+                write!(f, "Attempted to recv when the recv_queue is empty.")
+            }
+            ProtocolError::RecvBufferTooSmall => write!(
+                f,
+                "Attempted to recv with a buffer too small to hold the payload."
+            ),
+
             ProtocolError::PayloadTooLarge(size, max_size) => write!(
                 f,
                 "The payload size ({} bytes) was bigger than the max allowed size ({} bytes).",

@@ -1,17 +1,16 @@
+use crate::ASK_TELL;
 use crate::{
     segment::Segment, ProtocolError, ProtocolResult, CMD_ACK, DEADLINK, DEFAULT_MTU, INTERVAL,
     PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT,
 };
 use bytes::{Buf, BytesMut};
-use std::time::Duration;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use log::debug;
 use std::{
     cmp,
     collections::VecDeque,
-    io::{Cursor, Read},
+    io::{Cursor, Read, Write},
     ops::Add,
-    time::Instant,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub struct ReliableConnection {
@@ -22,7 +21,7 @@ pub struct ReliableConnection {
 
     send_una: u32,
     send_nxt: u32,
-    recv_nxt: u32,
+    recv_next_sequence_num: u32,
 
     ts_recent: u32,
     ts_lastack: u32,
@@ -82,7 +81,7 @@ impl ReliableConnection {
 
             send_una: 0,
             send_nxt: 0,
-            recv_nxt: 0,
+            recv_next_sequence_num: 0,
 
             ts_recent: 0,
             ts_lastack: 0,
@@ -131,8 +130,51 @@ impl ReliableConnection {
         }
     }
 
-    pub fn recv(&mut self, payload: &[u8]) -> ProtocolResult<usize> {
-        Ok(0)
+    pub fn recv(&mut self, buffer: &mut [u8]) -> ProtocolResult<usize> {
+        if self.recv_queue.is_empty() {
+            return Err(ProtocolError::EmptyRecvQueue);
+        }
+
+        let peek_size = self.peek_size()?;
+
+        if peek_size > buffer.len() {
+            return Err(ProtocolError::RecvBufferTooSmall);
+        }
+
+        let fast_recover = self.recv_queue.len() >= self.recv_window_size;
+
+        let mut cursor = Cursor::new(buffer);
+
+        // Write the full message data into the buffer.
+        while let Some(segment) = self.recv_queue.pop_front() {
+            cursor.write_all(&segment.data);
+            debug!("Received sequence_num: {}", segment.sequence_number);
+            if segment.fragment_id == 0 {
+                break;
+            }
+        }
+        assert_eq!(cursor.position() as usize, peek_size);
+
+        // Move available data from recv_buffer -> recv_queue
+        while let Some(segment) = self.recv_buffer.pop_front() {
+            if segment.sequence_number == self.recv_next_sequence_num
+                && self.recv_queue.len() < self.recv_window_size
+            {
+                self.recv_queue.push_back(segment);
+                self.recv_next_sequence_num += 1;
+            } else {
+                break;
+            }
+        }
+
+        // fast recover
+        if self.recv_queue.len() < self.recv_window_size && fast_recover {
+            // ready to send back CMD_WINS in `flush`
+            // tell remote my window size
+            self.probe |= ASK_TELL;
+        }
+
+        Ok(cursor.position() as usize)
     }
 
     /// Returns the size of the next message in the recv_queue.
@@ -273,7 +315,7 @@ impl ReliableConnection {
             }
         }
 
-        let mut tm_flush = time_diff(ts_flush, current) as u32;
+        let tm_flush = time_diff(ts_flush, current) as u32;
         let minimal = cmp::min(cmp::min(tm_packet, tm_flush), self.interval);
 
         return current + minimal;
@@ -326,10 +368,37 @@ fn time_diff(later: u32, earlier: u32) -> i32 {
 #[cfg(test)]
 mod test {
     use super::{time_diff, ProtocolError, ReliableConnection, Segment};
+    use bytes::BytesMut;
+    use std::io::Bytes;
     use std::{
         thread,
         time::{Duration, SystemTime},
     };
+
+    #[test]
+    fn test_recv_with_empty_queue() {
+        let mut connection = ReliableConnection::new(0);
+        let mut buffer = Vec::with_capacity(10);
+        assert_eq!(
+            connection.recv(&mut buffer).unwrap_err(),
+            ProtocolError::EmptyRecvQueue
+        );
+    }
+
+    #[test]
+    fn test_recv_with_too_small_buffer() {
+        let mut connection = ReliableConnection::new(0);
+        let mut buffer = Vec::new();
+        connection
+            .recv_queue
+            .push_back(Segment::new(BytesMut::from("test")));
+        assert_eq!(
+            connection.recv(&mut buffer).unwrap_err(),
+            ProtocolError::RecvBufferTooSmall
+        );
+    }
+
+    // TODO: Add many more tests around recv
 
     #[test]
     fn test_open_slots_in_recv_queue() {
@@ -347,7 +416,7 @@ mod test {
 
     #[test]
     fn test_peek_size() {
-        let mut connection = ReliableConnection::new(0);
+        let connection = ReliableConnection::new(0);
         assert_eq!(
             connection.peek_size().unwrap_err(),
             ProtocolError::IncompleteMessage
@@ -357,7 +426,7 @@ mod test {
     // TODO: Add many more tests around peek_size
 
     #[test]
-    fn send_with_empty_buffer_throws_error() {
+    fn test_send_with_empty_buffer_throws_error() {
         let mut connection = ReliableConnection::new(0);
         assert_eq!(
             connection.send(&vec![]).unwrap_err(),

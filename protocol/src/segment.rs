@@ -7,7 +7,7 @@ pub struct Segment {
     pub(crate) fragment_id: u8,
     pub(crate) wnd: u16,
     pub(crate) ts: u32,
-    pub(crate) sn: u32,
+    pub(crate) sequence_number: u32,
     pub(crate) una: u32,
     pub(crate) resend_time: u32,
     pub(crate) rto: u32,
@@ -30,7 +30,7 @@ impl Segment {
             fragment_id: 0,
             wnd: 0,
             ts: 0,
-            sn: 0,
+            sequence_number: 0,
             una: 0,
             resend_time: 0,
             rto: 0,
@@ -46,7 +46,7 @@ impl Segment {
         buf.put_u8(self.fragment_id);
         buf.put_u16_be(self.wnd);
         buf.put_u32_be(self.ts);
-        buf.put_u32_be(self.sn);
+        buf.put_u32_be(self.sequence_number);
         buf.put_u32_be(self.una);
         buf.put_u32_be(self.data.len() as u32);
         buf.put_slice(&self.data);
