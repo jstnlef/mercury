@@ -1,17 +1,19 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    io,
 };
 
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum ProtocolError {
     EmptyPayload,
     NumberOfFragmentsGreaterThanWindowSize,
     IncompleteMessage,
     EmptyRecvQueue,
     RecvBufferTooSmall,
+    IOError(io::Error),
 
     PayloadTooLarge(usize, usize),
     InvalidStreamId,
@@ -37,7 +39,7 @@ impl Display for ProtocolError {
                 f,
                 "Attempted to recv with a buffer too small to hold the payload."
             ),
-
+            ProtocolError::IOError(e) => write!(f, "An IO Error occurred. Reason: {:?}.", e),
             ProtocolError::PayloadTooLarge(size, max_size) => write!(
                 f,
                 "The payload size ({} bytes) was bigger than the max allowed size ({} bytes).",
@@ -50,3 +52,26 @@ impl Display for ProtocolError {
 }
 
 impl Error for ProtocolError {}
+
+impl From<io::Error> for ProtocolError {
+    fn from(inner: io::Error) -> ProtocolError {
+        ProtocolError::IOError(inner)
+    }
+}
+
+impl PartialEq for ProtocolError {
+    fn eq(&self, other: &ProtocolError) -> bool {
+        match (self, other) {
+            (ProtocolError::EmptyPayload, ProtocolError::EmptyPayload) => true,
+            (ProtocolError::NumberOfFragmentsGreaterThanWindowSize, ProtocolError::NumberOfFragmentsGreaterThanWindowSize) => true,
+            (ProtocolError::IncompleteMessage, ProtocolError::IncompleteMessage) => true,
+            (ProtocolError::EmptyRecvQueue, ProtocolError::EmptyRecvQueue) => true,
+            (ProtocolError::RecvBufferTooSmall, ProtocolError::RecvBufferTooSmall) => true,
+            (ProtocolError::PayloadTooLarge(_, _), ProtocolError::PayloadTooLarge(_, _)) => true,
+            (ProtocolError::InvalidStreamId, ProtocolError::InvalidStreamId) => true,
+            (ProtocolError::InvalidConfiguration(_), ProtocolError::InvalidConfiguration(_)) => true,
+            (ProtocolError::IOError(_), ProtocolError::IOError(_)) => true,
+            (_, _) => false
+        }
+    }
+}

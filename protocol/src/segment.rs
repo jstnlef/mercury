@@ -1,5 +1,4 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use std::time::SystemTime;
+use bytes::{BufMut, BytesMut};
 
 pub struct Segment {
     pub(crate) session_id: u32,

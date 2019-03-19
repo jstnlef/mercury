@@ -60,7 +60,6 @@ pub struct ReliableConnection {
     recv_buffer: VecDeque<Segment>,
 
     //    acklist: Vec<(u32, u32)>,
-
     payload_buffer: BytesMut,
 
     // Number of repeated acks to trigger fast retransmissions
@@ -117,7 +116,6 @@ impl ReliableConnection {
             recv_buffer: VecDeque::new(),
 
             //    acklist: Vec<(u32, u32)>,
-
             payload_buffer: BytesMut::with_capacity((DEFAULT_MTU + PROTOCOL_OVERHEAD) * 3),
 
             fast_resend: 0,
@@ -144,7 +142,7 @@ impl ReliableConnection {
 
         // Write the full message data into the buffer.
         while let Some(segment) = self.recv_queue.pop_front() {
-            cursor.write_all(&segment.data);
+            cursor.write_all(&segment.data)?;
             debug!("Received sequence_num: {}", segment.sequence_num);
             if segment.fragment_id == 0 {
                 break;
@@ -219,7 +217,7 @@ impl ReliableConnection {
                     let new_len = cmp::min(old_len + payload.len(), self.max_segment_size);
                     // TODO: Maybe this should be handled by a method on segment
                     segment.data.resize(new_len, 0);
-                    cursor.read_exact(&mut segment.data[old_len..new_len]);
+                    cursor.read_exact(&mut segment.data[old_len..new_len])?;
                     segment.fragment_id = 0;
                     if cursor.remaining() == 0 {
                         return Ok(());
@@ -247,7 +245,7 @@ impl ReliableConnection {
             let new_size = cmp::min(self.max_segment_size as usize, cursor.remaining());
             let mut segment = Segment::default();
             segment.data.resize(new_size, 0);
-            cursor.read_exact(&mut segment.data);
+            cursor.read_exact(&mut segment.data)?;
             segment.fragment_id = (if !self.in_streaming_mode {
                 num_fragments - i - 1
             } else {
