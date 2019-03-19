@@ -1,9 +1,16 @@
+use crate::ASK_SEND;
 use crate::ASK_TELL;
+use crate::CMD_PUSH;
+use crate::CMD_WASK;
+use crate::CMD_WINS;
+use crate::PROBE_INIT;
+use crate::PROBE_LIMIT;
+use crate::THRESH_MIN;
 use crate::{
     segment::Segment, ProtocolError, ProtocolResult, CMD_ACK, DEADLINK, DEFAULT_MTU, INTERVAL,
     PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT,
 };
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use log::debug;
 use std::{
     cmp,
@@ -20,22 +27,22 @@ pub struct ReliableConnection {
     // TODO: This should probably be an enum..
     connection_state: u32,
 
-    send_una: u32,
+    send_unacked_sequence_num: u32,
     next_send_sequence_num: u32,
     next_recv_sequence_num: u32,
 
     ssthresh: u32,
 
-    floating_rtt: i32,
-    static_rtt: i32,
-    calculated_rto: i32,
-    minimum_rto: i32,
+    floating_rtt: u32,
+    static_rtt: u32,
+    calculated_rto: u32,
+    minimum_rto: u32,
 
     send_window_size: usize,
     recv_window_size: usize,
     remote_window_size: usize,
+    congestion_window_size: usize,
 
-    congestion_window_size: u32,
     probe: u32,
 
     current_time: u32,
@@ -59,11 +66,11 @@ pub struct ReliableConnection {
     send_buffer: VecDeque<Segment>,
     recv_buffer: VecDeque<Segment>,
 
-    //    acklist: Vec<(u32, u32)>,
+    ack_list: Vec<(u32, u32)>,
     payload_buffer: BytesMut,
 
     // Number of repeated acks to trigger fast retransmissions
-    fast_resend: i32,
+    fast_resend: u32,
 
     use_congestion_control: bool,
     in_streaming_mode: bool,
@@ -78,7 +85,7 @@ impl ReliableConnection {
             max_segment_size: DEFAULT_MTU - PROTOCOL_OVERHEAD,
             connection_state: 0,
 
-            send_una: 0,
+            send_unacked_sequence_num: 0,
             next_send_sequence_num: 0,
             next_recv_sequence_num: 0,
 
@@ -115,7 +122,8 @@ impl ReliableConnection {
             send_buffer: VecDeque::new(),
             recv_buffer: VecDeque::new(),
 
-            //    acklist: Vec<(u32, u32)>,
+            // TODO: Need to allocate with capacity
+            ack_list: Vec::new(),
             payload_buffer: BytesMut::with_capacity((DEFAULT_MTU + PROTOCOL_OVERHEAD) * 3),
 
             fast_resend: 0,
@@ -344,7 +352,201 @@ impl ReliableConnection {
     }
 
     // Flushes pending data.
-    fn flush(&mut self) {}
+    // TODO: Go over how this works again and refactor if necessary.
+    fn flush(&mut self) {
+        if !self.update_called {
+            return;
+        }
+
+        let current = self.current_time;
+        let mut lost = false;
+        let mut change = false;
+
+        let mut segment = Segment::default();
+        segment.session_id = self.session_id;
+        segment.command = CMD_ACK;
+        segment.window_size = self.num_open_slots_in_recv_queue() as u16;
+        segment.unacked_sequence_num = self.next_recv_sequence_num;
+
+        // flush acknowledges
+        for (sequence_num, timestamp) in self.ack_list.iter() {
+            if self.payload_buffer.remaining_mut() + PROTOCOL_OVERHEAD > self.max_transmission_unit
+            {
+                // TODO: Write out bytes
+                self.payload_buffer.clear();
+            }
+            segment.sequence_num = *sequence_num;
+            segment.timestamp = *timestamp;
+            segment.encode(&mut self.payload_buffer);
+        }
+        self.ack_list.clear();
+
+        // probe window size (if remote window size equals zero)
+        if self.remote_window_size == 0 {
+            if self.probe_wait == 0 {
+                self.probe_wait = PROBE_INIT;
+                self.next_probe_time = self.current_time + self.probe_wait;
+            } else {
+                if time_diff(self.current_time, self.next_probe_time) >= 0 {
+                    if self.probe_wait < PROBE_INIT {
+                        self.probe_wait = PROBE_INIT;
+                    }
+                    self.probe_wait += self.probe_wait / 2;
+                    if self.probe_wait > PROBE_LIMIT {
+                        self.probe_wait = PROBE_LIMIT;
+                    }
+                    self.next_probe_time = self.current_time + self.probe_wait;
+                    self.probe |= ASK_SEND;
+                }
+            }
+        } else {
+            self.next_probe_time = 0;
+            self.probe_wait = 0;
+        }
+
+        // flush window probing commands
+        if (self.probe & ASK_SEND) != 0 {
+            segment.command = CMD_WASK;
+            if self.payload_buffer.remaining_mut() + PROTOCOL_OVERHEAD > self.max_transmission_unit
+            {
+                // TODO: Write out bytes
+                self.payload_buffer.clear();
+            }
+            segment.encode(&mut self.payload_buffer);
+        }
+
+        // flush window probing commands
+        if (self.probe & ASK_TELL) != 0 {
+            segment.command = CMD_WINS;
+            if self.payload_buffer.remaining_mut() + PROTOCOL_OVERHEAD > self.max_transmission_unit
+            {
+                // TODO: Write out bytes
+                self.payload_buffer.clear();
+            }
+            segment.encode(&mut self.payload_buffer);
+        }
+
+        self.probe = 0;
+
+        // calculate window size
+        let mut congestion_window_size = cmp::min(self.send_window_size, self.remote_window_size);
+        if self.use_congestion_control {
+            congestion_window_size = cmp::min(self.congestion_window_size, congestion_window_size);
+        }
+
+        // move data from send_queue to send_buffer
+        while self.next_send_sequence_num
+            < self.send_unacked_sequence_num + congestion_window_size as u32
+        {
+            if let Some(mut new_segment) = self.send_queue.pop_front() {
+                new_segment.session_id = self.session_id;
+                new_segment.command = CMD_PUSH;
+                new_segment.window_size = segment.window_size;
+                new_segment.timestamp = current;
+                new_segment.sequence_num = self.next_send_sequence_num;
+                self.next_send_sequence_num += 1;
+                new_segment.unacked_sequence_num = self.next_recv_sequence_num;
+                new_segment.resend_time = current;
+                new_segment.rto = self.calculated_rto;
+                new_segment.fastack = 0;
+                new_segment.xmit = 0;
+                self.send_buffer.push_back(new_segment);
+            } else {
+                break;
+            }
+        }
+
+        // calculate resent
+        let resent = if self.fast_resend > 0 {
+            self.fast_resend
+        } else {
+            u32::max_value()
+        };
+        let rto_min = if self.nodelay == 0 {
+            self.calculated_rto >> 3
+        } else {
+            0
+        };
+
+        // flush data segments
+        for buffer_segment in self.send_buffer.iter_mut() {
+            let mut need_send = false;
+            if buffer_segment.xmit == 0 {
+                need_send = true;
+                buffer_segment.xmit += 1;
+                buffer_segment.rto = self.calculated_rto;
+                buffer_segment.resend_time = current + buffer_segment.rto + rto_min;
+            } else if time_diff(current, buffer_segment.resend_time) >= 0 {
+                need_send = true;
+                buffer_segment.xmit += 1;
+                self.xmit += 1;
+                if self.nodelay == 0 {
+                    buffer_segment.rto += self.calculated_rto;
+                } else {
+                    buffer_segment.rto += self.calculated_rto >> 2;
+                }
+                buffer_segment.resend_time = current + buffer_segment.rto;
+                lost = true;
+            } else if buffer_segment.fastack >= resent {
+                need_send = true;
+                buffer_segment.xmit += 1;
+                buffer_segment.fastack = 0;
+                buffer_segment.resend_time = current + buffer_segment.rto;
+                change = true;
+            }
+
+            if need_send {
+                buffer_segment.timestamp = current;
+                buffer_segment.window_size = segment.window_size;
+                buffer_segment.unacked_sequence_num = self.next_recv_sequence_num;
+
+                let len = buffer_segment.data.len();
+                let need = PROTOCOL_OVERHEAD + len;
+
+                if self.payload_buffer.remaining_mut() + need > self.max_transmission_unit {
+                    // TODO: Need to write here.
+                    self.payload_buffer.clear();
+                }
+                buffer_segment.encode(&mut self.payload_buffer);
+
+                // never used
+                // if segment.xmit >= self.dead_link {
+                //     self.state = -1;
+                // }
+            }
+        }
+
+        // flush remaining segments
+        if self.payload_buffer.remaining_mut() > 0 {
+            // TODO: Need to write here.
+            self.payload_buffer.clear();
+        }
+
+        // update ssthresh
+        if change {
+            let in_flight = self.next_send_sequence_num - self.send_unacked_sequence_num;
+            self.ssthresh = in_flight >> 2;
+            if self.ssthresh < THRESH_MIN {
+                self.ssthresh = THRESH_MIN;
+            }
+            self.congestion_window_size = (self.ssthresh + resent) as usize;
+            self.incr = (self.congestion_window_size * self.max_segment_size) as u32;
+        }
+
+        if lost {
+            self.ssthresh = (congestion_window_size >> 2) as u32;
+            if self.ssthresh < THRESH_MIN {
+                self.ssthresh = THRESH_MIN;
+            }
+            self.congestion_window_size = 1;
+            self.incr = self.max_segment_size as u32;
+        }
+
+        if self.congestion_window_size < 1 {
+            self.congestion_window_size = 1;
+            self.incr = self.max_segment_size as u32;
+        }
+    }
 
     // Calculates the number of open slots in the receive queue based on the set recv window size.
     fn num_open_slots_in_recv_queue(&self) -> usize {

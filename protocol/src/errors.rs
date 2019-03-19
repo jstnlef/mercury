@@ -63,15 +63,20 @@ impl PartialEq for ProtocolError {
     fn eq(&self, other: &ProtocolError) -> bool {
         match (self, other) {
             (ProtocolError::EmptyPayload, ProtocolError::EmptyPayload) => true,
-            (ProtocolError::NumberOfFragmentsGreaterThanWindowSize, ProtocolError::NumberOfFragmentsGreaterThanWindowSize) => true,
+            (
+                ProtocolError::NumberOfFragmentsGreaterThanWindowSize,
+                ProtocolError::NumberOfFragmentsGreaterThanWindowSize,
+            ) => true,
             (ProtocolError::IncompleteMessage, ProtocolError::IncompleteMessage) => true,
             (ProtocolError::EmptyRecvQueue, ProtocolError::EmptyRecvQueue) => true,
             (ProtocolError::RecvBufferTooSmall, ProtocolError::RecvBufferTooSmall) => true,
             (ProtocolError::PayloadTooLarge(_, _), ProtocolError::PayloadTooLarge(_, _)) => true,
             (ProtocolError::InvalidStreamId, ProtocolError::InvalidStreamId) => true,
-            (ProtocolError::InvalidConfiguration(_), ProtocolError::InvalidConfiguration(_)) => true,
+            (ProtocolError::InvalidConfiguration(_), ProtocolError::InvalidConfiguration(_)) => {
+                true
+            }
             (ProtocolError::IOError(_), ProtocolError::IOError(_)) => true,
-            (_, _) => false
+            (_, _) => false,
         }
     }
 }
