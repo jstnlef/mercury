@@ -2,13 +2,13 @@ use bytes::{BufMut, Bytes, BytesMut};
 use std::time::SystemTime;
 
 pub struct Segment {
-    pub(crate) conv: u32,
-    pub(crate) cmd: u8,
+    pub(crate) session_id: u32,
+    pub(crate) command: u8,
     pub(crate) fragment_id: u8,
-    pub(crate) wnd: u16,
-    pub(crate) ts: u32,
-    pub(crate) sequence_number: u32,
-    pub(crate) una: u32,
+    pub(crate) window_size: u16,
+    pub(crate) timestamp: u32,
+    pub(crate) sequence_num: u32,
+    pub(crate) unacked_sequence_num: u32,
     pub(crate) resend_time: u32,
     pub(crate) rto: u32,
     pub(crate) fastack: u32,
@@ -25,13 +25,13 @@ impl Default for Segment {
 impl Segment {
     pub fn new(data: BytesMut) -> Self {
         Self {
-            conv: 0,
-            cmd: 0,
+            session_id: 0,
+            command: 0,
             fragment_id: 0,
-            wnd: 0,
-            ts: 0,
-            sequence_number: 0,
-            una: 0,
+            window_size: 0,
+            timestamp: 0,
+            sequence_num: 0,
+            unacked_sequence_num: 0,
             resend_time: 0,
             rto: 0,
             fastack: 0,
@@ -41,13 +41,13 @@ impl Segment {
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u32_be(self.conv);
-        buf.put_u8(self.cmd);
+        buf.put_u32_be(self.session_id);
+        buf.put_u8(self.command);
         buf.put_u8(self.fragment_id);
-        buf.put_u16_be(self.wnd);
-        buf.put_u32_be(self.ts);
-        buf.put_u32_be(self.sequence_number);
-        buf.put_u32_be(self.una);
+        buf.put_u16_be(self.window_size);
+        buf.put_u32_be(self.timestamp);
+        buf.put_u32_be(self.sequence_num);
+        buf.put_u32_be(self.unacked_sequence_num);
         buf.put_u32_be(self.data.len() as u32);
         buf.put_slice(&self.data);
     }

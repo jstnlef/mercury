@@ -14,43 +14,43 @@ use std::{
 };
 
 pub struct ReliableConnection {
-    conv: u32,
-    mtu: usize,
+    session_id: u32,
+    max_transmission_unit: usize,
     max_segment_size: usize,
-    state: u32,
+    // TODO: This should probably be an enum..
+    connection_state: u32,
 
     send_una: u32,
-    send_nxt: u32,
-    recv_next_sequence_num: u32,
+    next_send_sequence_num: u32,
+    next_recv_sequence_num: u32,
 
-    ts_recent: u32,
-    ts_lastack: u32,
     ssthresh: u32,
 
-    rx_rttval: i32,
-    rx_srtt: i32,
-    rx_rto: i32,
-    rx_minrto: i32,
+    floating_rtt: i32,
+    static_rtt: i32,
+    calculated_rto: i32,
+    minimum_rto: i32,
 
     send_window_size: usize,
     recv_window_size: usize,
-    rmt_window: usize,
+    remote_window_size: usize,
 
-    cwnd: u32,
+    congestion_window_size: u32,
     probe: u32,
 
     current_time: u32,
     interval: u32,
-    last_flush_time: u32,
+    next_flush_time: u32,
     update_called: bool,
 
     xmit: u32,
 
     nodelay: u32,
 
-    ts_probe: u32,
+    next_probe_time: u32,
     probe_wait: u32,
 
+    // Maximum number of retransmissions
     dead_link: u32,
     incr: u32,
 
@@ -61,53 +61,51 @@ pub struct ReliableConnection {
 
     //    acklist: Vec<(u32, u32)>,
 
-    // user: String,
     payload_buffer: BytesMut,
 
+    // Number of repeated acks to trigger fast retransmissions
     fast_resend: i32,
 
-    nocwnd: i32,
+    use_congestion_control: bool,
     in_streaming_mode: bool,
     //    output: W,
 }
 
 impl ReliableConnection {
-    pub fn new(conv: u32) -> Self {
+    pub fn new(session_id: u32) -> Self {
         Self {
-            conv,
-            mtu: DEFAULT_MTU,
+            session_id,
+            max_transmission_unit: DEFAULT_MTU,
             max_segment_size: DEFAULT_MTU - PROTOCOL_OVERHEAD,
-            state: 0,
+            connection_state: 0,
 
             send_una: 0,
-            send_nxt: 0,
-            recv_next_sequence_num: 0,
+            next_send_sequence_num: 0,
+            next_recv_sequence_num: 0,
 
-            ts_recent: 0,
-            ts_lastack: 0,
             ssthresh: THRESH_INIT,
 
-            rx_rttval: 0,
-            rx_srtt: 0,
-            rx_rto: RTO_DEF,
-            rx_minrto: RTO_MIN,
+            floating_rtt: 0,
+            static_rtt: 0,
+            calculated_rto: RTO_DEF,
+            minimum_rto: RTO_MIN,
 
             send_window_size: SEND_WINDOW_SIZE,
             recv_window_size: RECV_WINDOW_SIZE,
-            rmt_window: RECV_WINDOW_SIZE,
-            cwnd: 0,
+            remote_window_size: RECV_WINDOW_SIZE,
+            congestion_window_size: 0,
             probe: 0,
 
             current_time: 0,
             interval: 0,
-            last_flush_time: 0,
+            next_flush_time: 0,
             update_called: false,
 
             xmit: 0,
 
             nodelay: 0,
 
-            ts_probe: 0,
+            next_probe_time: 0,
             probe_wait: 0,
 
             dead_link: DEADLINK,
@@ -120,12 +118,11 @@ impl ReliableConnection {
 
             //    acklist: Vec<(u32, u32)>,
 
-            // user: String,
             payload_buffer: BytesMut::with_capacity((DEFAULT_MTU + PROTOCOL_OVERHEAD) * 3),
 
             fast_resend: 0,
 
-            nocwnd: 0,
+            use_congestion_control: false,
             in_streaming_mode: false,
         }
     }
@@ -148,7 +145,7 @@ impl ReliableConnection {
         // Write the full message data into the buffer.
         while let Some(segment) = self.recv_queue.pop_front() {
             cursor.write_all(&segment.data);
-            debug!("Received sequence_num: {}", segment.sequence_number);
+            debug!("Received sequence_num: {}", segment.sequence_num);
             if segment.fragment_id == 0 {
                 break;
             }
@@ -157,11 +154,11 @@ impl ReliableConnection {
 
         // Move available data from recv_buffer -> recv_queue
         while let Some(segment) = self.recv_buffer.pop_front() {
-            if segment.sequence_number == self.recv_next_sequence_num
+            if segment.sequence_num == self.next_recv_sequence_num
                 && self.recv_queue.len() < self.recv_window_size
             {
                 self.recv_queue.push_back(segment);
-                self.recv_next_sequence_num += 1;
+                self.next_recv_sequence_num += 1;
             } else {
                 break;
             }
@@ -268,20 +265,20 @@ impl ReliableConnection {
         self.current_time = current;
         if !self.update_called {
             self.update_called = true;
-            self.last_flush_time = self.current_time;
+            self.next_flush_time = self.current_time;
         }
 
-        let mut time_since = time_diff(self.current_time, self.last_flush_time);
+        let mut time_since = time_diff(self.current_time, self.next_flush_time);
 
         if time_since >= 10_000 || time_since < -10_000 {
-            self.last_flush_time = self.current_time;
+            self.next_flush_time = self.current_time;
             time_since = 0;
         }
 
         if time_since >= 0 {
-            self.last_flush_time += self.interval;
-            if time_diff(self.current_time, self.last_flush_time) >= 0 {
-                self.last_flush_time = self.current_time + self.interval;
+            self.next_flush_time += self.interval;
+            if time_diff(self.current_time, self.next_flush_time) >= 0 {
+                self.next_flush_time = self.current_time + self.interval;
             }
             self.flush();
         }
@@ -293,7 +290,7 @@ impl ReliableConnection {
             return current;
         }
 
-        let mut ts_flush = self.last_flush_time;
+        let mut ts_flush = self.next_flush_time;
 
         let time_delta = time_diff(current, ts_flush);
         if time_delta >= 0 {
@@ -329,8 +326,8 @@ impl ReliableConnection {
             return Err(ProtocolError::InvalidConfiguration("MTU too small."));
         }
 
-        self.mtu = mtu;
-        self.max_segment_size = self.mtu - PROTOCOL_OVERHEAD;
+        self.max_transmission_unit = mtu;
+        self.max_segment_size = self.max_transmission_unit - PROTOCOL_OVERHEAD;
         let new_size = (mtu + PROTOCOL_OVERHEAD) * 3;
         self.payload_buffer.resize(new_size, 0);
 
@@ -457,14 +454,14 @@ mod test {
         assert_eq!(connection.payload_buffer.capacity(), 4272);
 
         assert!(connection.set_mtu(50).is_ok());
-        assert_eq!(connection.mtu, 50);
+        assert_eq!(connection.max_transmission_unit, 50);
         assert_eq!(connection.max_segment_size, 26);
         assert_eq!(connection.payload_buffer.len(), 222);
         assert_eq!(connection.payload_buffer.capacity(), 4272);
 
         // Looks like Bytes doubles its buffer when resized.
         assert!(connection.set_mtu(1500).is_ok());
-        assert_eq!(connection.mtu, 1500);
+        assert_eq!(connection.max_transmission_unit, 1500);
         assert_eq!(connection.max_segment_size, 1476);
         assert_eq!(connection.payload_buffer.len(), 4572);
         assert_eq!(connection.payload_buffer.capacity(), 8544);
