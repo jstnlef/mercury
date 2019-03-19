@@ -351,6 +351,44 @@ impl ReliableConnection {
         self.send_buffer.len() + self.send_queue.len()
     }
 
+    fn parse_ack(&mut self, sequence_num: u32) {
+        if sequence_num < self.send_unacked_sequence_num || sequence_num >= self.next_send_sequence_num {
+            return;
+        }
+        for i in 0..self.send_buffer.len() {
+            let segment = &self.send_buffer[i];
+            if sequence_num == segment.sequence_num {
+                self.send_buffer.remove(i);
+                break;
+            } else if sequence_num < segment.sequence_num {
+                break;
+            }
+        }
+    }
+
+    fn parse_unacked(&mut self, unacked_sequence_num: u32) {
+        while let Some(segment) = self.send_buffer.pop_front() {
+            if unacked_sequence_num <= segment.sequence_num {
+                break;
+            }
+        }
+    }
+
+    fn parse_fastack(&mut self, sequence_num: u32) {
+        if sequence_num < self.send_unacked_sequence_num
+            || sequence_num >= self.next_send_sequence_num
+        {
+            return;
+        }
+        for segment in &mut self.send_buffer {
+            if sequence_num < segment.sequence_num {
+                break;
+            } else if sequence_num != segment.sequence_num {
+                segment.fastack += 1;
+            }
+        }
+    }
+
     // Flushes pending data.
     // TODO: Go over how this works again and refactor if necessary.
     fn flush(&mut self) {
