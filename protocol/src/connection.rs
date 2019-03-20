@@ -374,6 +374,47 @@ impl ReliableConnection {
         self.send_buffer.len() + self.send_queue.len()
     }
 
+    fn parse_data(&mut self, segment: Segment) {
+        let sn = segment.sequence_num;
+        if sn >= self.next_recv_sequence_num + self.recv_window_size as u32 || sn < self.next_recv_sequence_num {
+            return;
+        }
+
+        let mut repeat = false;
+        let mut index: usize = self.recv_buffer.len();
+        for seg in self.recv_buffer.iter().rev() {
+            if sn == seg.sequence_num {
+                repeat = true;
+                break;
+            } else if sn > seg.sequence_num {
+                break;
+            }
+            index -= 1;
+        }
+
+        if !repeat {
+            self.recv_buffer.insert(index, segment);
+        }
+
+        // move available data from rcv_buf -> rcv_queue
+        index = 0;
+        let mut queue_len = self.recv_queue.len();
+        for seg in self.recv_buffer.iter() {
+            if seg.sequence_num == self.next_recv_sequence_num && queue_len < self.recv_window_size as usize {
+                queue_len += 1;
+                self.next_recv_sequence_num += 1;
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        if index > 0 {
+            let new_rcv_buf = self.recv_buffer.split_off(index);
+            self.recv_queue.append(&mut self.recv_buffer);
+            self.recv_buffer = new_rcv_buf;
+        }
+    }
+
     fn update_ack(&mut self, rtt: u32) {
         if self.static_rtt == 0 {
             self.static_rtt = rtt;
