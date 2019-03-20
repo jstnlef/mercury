@@ -12,7 +12,9 @@ pub enum ProtocolError {
     FragmentsGreaterThanWindowSize,
     IncompleteMessage,
     EmptyRecvQueue,
-    RecvBufferTooSmall,
+    BufferTooSmall,
+    InvalidSessionId,
+    InvalidCommand,
     IOError(io::Error),
 
     PayloadTooLarge(usize, usize),
@@ -35,10 +37,12 @@ impl Display for ProtocolError {
             ProtocolError::EmptyRecvQueue => {
                 write!(f, "Attempted to recv when the recv_queue is empty.")
             }
-            ProtocolError::RecvBufferTooSmall => write!(
+            ProtocolError::BufferTooSmall => write!(
                 f,
                 "Attempted to recv with a buffer too small to hold the payload."
             ),
+            ProtocolError::InvalidSessionId => write!(f, "Session id doesn't match."),
+            ProtocolError::InvalidCommand => write!(f, "Unrecognized command."),
             ProtocolError::IOError(e) => write!(f, "An IO Error occurred. Reason: {:?}.", e),
             ProtocolError::PayloadTooLarge(size, max_size) => write!(
                 f,
@@ -69,7 +73,7 @@ impl PartialEq for ProtocolError {
             ) => true,
             (ProtocolError::IncompleteMessage, ProtocolError::IncompleteMessage) => true,
             (ProtocolError::EmptyRecvQueue, ProtocolError::EmptyRecvQueue) => true,
-            (ProtocolError::RecvBufferTooSmall, ProtocolError::RecvBufferTooSmall) => true,
+            (ProtocolError::BufferTooSmall, ProtocolError::BufferTooSmall) => true,
             (ProtocolError::PayloadTooLarge(_, _), ProtocolError::PayloadTooLarge(_, _)) => true,
             (ProtocolError::InvalidStreamId, ProtocolError::InvalidStreamId) => true,
             (ProtocolError::InvalidConfiguration(_), ProtocolError::InvalidConfiguration(_)) => {

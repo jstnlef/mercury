@@ -134,7 +134,7 @@ impl ReliableConnection {
         let peek_size = self.peek_size()?;
 
         if peek_size > buffer.len() {
-            return Err(ProtocolError::RecvBufferTooSmall);
+            return Err(ProtocolError::BufferTooSmall);
         }
 
         let fast_recover = self.recv_queue.len() >= self.recv_window_size;
@@ -171,6 +171,113 @@ impl ReliableConnection {
         }
 
         Ok(cursor.position() as usize)
+    }
+
+    /// when you received a low level packet (eg. UDP packet), call it
+    pub fn input(&mut self, buffer: &[u8]) -> ProtocolResult<usize> {
+        let n = buffer.len();
+        let mut cursor = Cursor::new(buffer);
+
+        if cursor.remaining() < PROTOCOL_OVERHEAD {
+            return Err(ProtocolError::BufferTooSmall);
+        }
+        let old_unacked = self.unacked_send_sequence_num;
+        let mut flag = false;
+        let mut maxack: u32 = 0;
+        while cursor.remaining() >= PROTOCOL_OVERHEAD {
+            let session_id = cursor.get_u32_be();
+            if session_id != self.session_id {
+                return Err(ProtocolError::InvalidSessionId);
+            }
+
+            let command = cursor.get_u8();
+            let fragment_id = cursor.get_u8();
+            let window_size = cursor.get_u16_be();
+            let timestamp = cursor.get_u32_be();
+            let sequence_num = cursor.get_u32_be();
+            let unacked_sequence_num = cursor.get_u32_be();
+            let len = cursor.get_u32_be() as usize;
+
+            if cursor.remaining() < len {
+                return Err(ProtocolError::IncompleteMessage);
+            }
+
+            if command != CMD_PUSH && command != CMD_ACK && command != CMD_WASK &&
+                command != CMD_WINS
+            {
+                return Err(ProtocolError::InvalidCommand);
+            }
+
+            self.remote_window_size = window_size as usize;
+            self.parse_unacked(unacked_sequence_num);
+            self.shrink_buffer();
+            if command == CMD_ACK {
+                let rtt = time_diff(self.current_time, timestamp);
+                if rtt >= 0 {
+                    self.update_ack(rtt as u32);
+                }
+                self.parse_ack(sequence_num);
+                self.shrink_buffer();
+                if !flag {
+                    flag = true;
+                    maxack = sequence_num;
+                } else {
+                    if sequence_num > maxack {
+                        maxack = sequence_num;
+                    }
+                }
+            } else if command == CMD_PUSH {
+                if sequence_num < self.next_recv_sequence_num + self.recv_window_size as u32 {
+                    self.ack_list.push((sequence_num, timestamp));
+                    if sequence_num >= self.next_recv_sequence_num {
+                        let mut segment = Segment::default();
+                        segment.session_id = session_id;
+                        segment.command = command;
+                        segment.fragment_id = fragment_id;
+                        segment.window_size = window_size as u16;
+                        segment.timestamp = timestamp;
+                        segment.sequence_num = sequence_num;
+                        segment.unacked_sequence_num = unacked_sequence_num;
+                        segment.data.resize(len, 0);
+                        cursor.read_exact(&mut segment.data)?;
+                        self.parse_data(segment);
+                    }
+                }
+            } else if command == CMD_WASK {
+                // ready to send back KCP_CMD_WINS in `flush`
+                // tell remote my window size
+                self.probe |= ASK_TELL;
+            } else if command == CMD_WINS {
+                // do nothing
+            }
+        }
+
+        if flag {
+            self.parse_fastack(maxack);
+        }
+
+        if self.unacked_send_sequence_num > old_unacked {
+            if self.congestion_window_size < self.remote_window_size {
+                let mss = self.max_segment_size as u32;
+                if self.congestion_window_size < self.ssthresh as usize {
+                    self.congestion_window_size += 1;
+                    self.incr += mss;
+                } else {
+                    if self.incr < mss {
+                        self.incr = mss;
+                    }
+                    self.incr += (mss * mss) / self.incr + (mss / 16);
+                    if (self.congestion_window_size + 1) as u32 * mss <= self.incr {
+                        self.congestion_window_size += 1;
+                    }
+                }
+                if self.congestion_window_size > self.remote_window_size {
+                    self.congestion_window_size = self.remote_window_size;
+                    self.incr = self.remote_window_size as u32 * mss;
+                }
+            }
+        }
+        Ok(n - cursor.remaining())
     }
 
     /// Returns the size of the next message in the recv_queue.
@@ -729,7 +836,7 @@ mod test {
             .push_back(Segment::new(BytesMut::from("test")));
         assert_eq!(
             connection.recv(&mut buffer).unwrap_err(),
-            ProtocolError::RecvBufferTooSmall
+            ProtocolError::BufferTooSmall
         );
     }
 
