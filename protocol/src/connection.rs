@@ -1,14 +1,7 @@
-use crate::ASK_SEND;
-use crate::ASK_TELL;
-use crate::CMD_PUSH;
-use crate::CMD_WASK;
-use crate::CMD_WINS;
-use crate::PROBE_INIT;
-use crate::PROBE_LIMIT;
-use crate::THRESH_MIN;
 use crate::{
     segment::Segment, ProtocolError, ProtocolResult, CMD_ACK, DEADLINK, DEFAULT_MTU, INTERVAL,
-    PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT,
+    PROTOCOL_OVERHEAD, RECV_WINDOW_SIZE, RTO_DEF, RTO_MIN, SEND_WINDOW_SIZE, THRESH_INIT, RTO_MAX,
+    RTO_NDL, ASK_SEND, ASK_TELL, CMD_PUSH, CMD_WASK, CMD_WINS, PROBE_INIT, PROBE_LIMIT, THRESH_MIN
 };
 use bytes::{Buf, BufMut, BytesMut};
 use log::debug;
@@ -27,7 +20,7 @@ pub struct ReliableConnection {
     // TODO: This should probably be an enum..
     connection_state: u32,
 
-    send_unacked_sequence_num: u32,
+    unacked_send_sequence_num: u32,
     next_send_sequence_num: u32,
     next_recv_sequence_num: u32,
 
@@ -85,7 +78,7 @@ impl ReliableConnection {
             max_segment_size: DEFAULT_MTU - PROTOCOL_OVERHEAD,
             connection_state: 0,
 
-            send_unacked_sequence_num: 0,
+            unacked_send_sequence_num: 0,
             next_send_sequence_num: 0,
             next_recv_sequence_num: 0,
 
@@ -117,8 +110,8 @@ impl ReliableConnection {
             dead_link: DEADLINK,
             incr: 0,
 
-            send_queue: VecDeque::new(),
-            recv_queue: VecDeque::new(),
+            send_queue: VecDeque::with_capacity(SEND_WINDOW_SIZE),
+            recv_queue: VecDeque::with_capacity(RECV_WINDOW_SIZE),
             send_buffer: VecDeque::new(),
             recv_buffer: VecDeque::new(),
 
@@ -199,7 +192,7 @@ impl ReliableConnection {
         }
 
         let mut size = 0;
-        for segment in &self.recv_queue {
+        for segment in self.recv_queue.iter() {
             size += segment.data.len();
             if segment.fragment_id == 0 {
                 break;
@@ -241,7 +234,7 @@ impl ReliableConnection {
         };
 
         if num_fragments >= RECV_WINDOW_SIZE {
-            return Err(ProtocolError::NumberOfFragmentsGreaterThanWindowSize);
+            return Err(ProtocolError::FragmentsGreaterThanWindowSize);
         }
 
         if num_fragments == 0 {
@@ -340,6 +333,36 @@ impl ReliableConnection {
         Ok(())
     }
 
+    /// fastest: nodelay(1, 20, 2, true)
+    /// `nodelay`: 0:disable(default), 1:enable
+    /// `interval`: internal update timer interval in millisec, default is 100ms
+    /// `resend`: 0:disable fast resend(default), 1:enable fast resend
+    /// `use_congestion_control`: true: normal congestion control(default), false: disable congestion control
+    pub fn nodelay(&mut self, nodelay: i32, interval: i32, resend: i32, use_congestion_control: bool) {
+        if nodelay >= 0 {
+            let nodelay = nodelay as u32;
+            self.nodelay = nodelay;
+            if nodelay > 0 {
+                self.minimum_rto = RTO_NDL;
+            } else {
+                self.minimum_rto = RTO_MIN;
+            }
+        }
+        if interval >= 0 {
+            let mut interval = interval as u32;
+            if interval > 5000 {
+                interval = 5000;
+            } else if interval < 10 {
+                interval = 10;
+            }
+            self.interval = interval;
+        }
+        if resend >= 0 {
+            self.fast_resend = resend as u32;
+        }
+        self.use_congestion_control = use_congestion_control;
+    }
+
     // Sets maximum window sizes: send_window_size=32, recv_window_size=32 by default
     pub fn set_window_sizes(&mut self, send_size: usize, recv_size: usize) {
         self.send_window_size = send_size;
@@ -351,8 +374,38 @@ impl ReliableConnection {
         self.send_buffer.len() + self.send_queue.len()
     }
 
+    fn update_ack(&mut self, rtt: u32) {
+        if self.static_rtt == 0 {
+            self.static_rtt = rtt;
+            self.floating_rtt = rtt >> 1;
+        } else {
+            let delta = if rtt > self.static_rtt {
+                rtt - self.static_rtt
+            } else {
+                self.static_rtt - rtt
+            };
+            self.floating_rtt = (3 * self.floating_rtt + delta) >> 2;
+            self.static_rtt = (7 * self.static_rtt + rtt) >> 3;
+            if self.static_rtt < 1 {
+                self.static_rtt = 1;
+            }
+        }
+        let rto = self.static_rtt + cmp::max(self.interval, 4 * self.floating_rtt);
+        self.calculated_rto = bound(self.minimum_rto, rto, RTO_MAX);
+    }
+
+    #[inline]
+    fn shrink_buffer(&mut self) {
+        self.unacked_send_sequence_num = match self.send_buffer.front() {
+            Some(segment) => segment.sequence_num,
+            None => self.next_send_sequence_num,
+        };
+    }
+
     fn parse_ack(&mut self, sequence_num: u32) {
-        if sequence_num < self.send_unacked_sequence_num || sequence_num >= self.next_send_sequence_num {
+        if sequence_num < self.unacked_send_sequence_num
+            || sequence_num >= self.next_send_sequence_num
+        {
             return;
         }
         for i in 0..self.send_buffer.len() {
@@ -375,7 +428,7 @@ impl ReliableConnection {
     }
 
     fn parse_fastack(&mut self, sequence_num: u32) {
-        if sequence_num < self.send_unacked_sequence_num
+        if sequence_num < self.unacked_send_sequence_num
             || sequence_num >= self.next_send_sequence_num
         {
             return;
@@ -474,7 +527,7 @@ impl ReliableConnection {
 
         // move data from send_queue to send_buffer
         while self.next_send_sequence_num
-            < self.send_unacked_sequence_num + congestion_window_size as u32
+            < self.unacked_send_sequence_num + congestion_window_size as u32
         {
             if let Some(mut new_segment) = self.send_queue.pop_front() {
                 new_segment.session_id = self.session_id;
@@ -562,7 +615,7 @@ impl ReliableConnection {
 
         // update ssthresh
         if change {
-            let in_flight = self.next_send_sequence_num - self.send_unacked_sequence_num;
+            let in_flight = self.next_send_sequence_num - self.unacked_send_sequence_num;
             self.ssthresh = in_flight >> 2;
             if self.ssthresh < THRESH_MIN {
                 self.ssthresh = THRESH_MIN;
@@ -596,8 +649,14 @@ impl ReliableConnection {
     }
 }
 
+#[inline]
 fn time_diff(later: u32, earlier: u32) -> i32 {
     later as i32 - earlier as i32
+}
+
+#[inline]
+fn bound(lower: u32, value: u32, upper: u32) -> u32 {
+    cmp::min(cmp::max(lower, value), upper)
 }
 
 #[cfg(test)]

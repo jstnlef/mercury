@@ -9,7 +9,7 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 #[derive(Debug)]
 pub enum ProtocolError {
     EmptyPayload,
-    NumberOfFragmentsGreaterThanWindowSize,
+    FragmentsGreaterThanWindowSize,
     IncompleteMessage,
     EmptyRecvQueue,
     RecvBufferTooSmall,
@@ -24,7 +24,7 @@ impl Display for ProtocolError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             ProtocolError::EmptyPayload => write!(f, "Attempted to send an empty buffer."),
-            ProtocolError::NumberOfFragmentsGreaterThanWindowSize => write!(
+            ProtocolError::FragmentsGreaterThanWindowSize => write!(
                 f,
                 "Number of fragments required is greater than the window size."
             ),
@@ -64,8 +64,8 @@ impl PartialEq for ProtocolError {
         match (self, other) {
             (ProtocolError::EmptyPayload, ProtocolError::EmptyPayload) => true,
             (
-                ProtocolError::NumberOfFragmentsGreaterThanWindowSize,
-                ProtocolError::NumberOfFragmentsGreaterThanWindowSize,
+                ProtocolError::FragmentsGreaterThanWindowSize,
+                ProtocolError::FragmentsGreaterThanWindowSize,
             ) => true,
             (ProtocolError::IncompleteMessage, ProtocolError::IncompleteMessage) => true,
             (ProtocolError::EmptyRecvQueue, ProtocolError::EmptyRecvQueue) => true,
